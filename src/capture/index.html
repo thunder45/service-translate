@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Service Translate - Audio Capture</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      padding: 20px;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    .section {
+      margin: 20px 0;
+      padding: 15px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+    }
+    input, button {
+      padding: 8px 12px;
+      margin: 5px 0;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    label {
+      display: block;
+      margin-top: 10px;
+      margin-bottom: 3px;
+      font-weight: 500;
+      font-size: 14px;
+      color: #333;
+    }
+    button {
+      background: #007AFF;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .status {
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 6px;
+      background: #f0f0f0;
+    }
+    .qr-code {
+      text-align: center;
+      margin: 20px 0;
+    }
+    .qr-code img {
+      max-width: 300px;
+    }
+    .hidden {
+      display: none;
+    }
+    .config-link {
+      color: #007AFF;
+      cursor: pointer;
+      text-decoration: underline;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Service Translate - Audio Capture</h1>
+
+  <div class="section" id="loginSection">
+    <h2>Login</h2>
+    <input type="text" id="username" placeholder="Username (email)">
+    <input type="password" id="password" placeholder="Password">
+    <button id="loginBtn">Login</button>
+    <div class="status" id="loginStatus">Please login</div>
+    <div class="config-link" onclick="toggleConfig()">⚙️ Configuration</div>
+    
+    <div id="configSection" class="hidden" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ddd;">
+      <label>WebSocket Endpoint:</label>
+      <input type="text" id="endpoint" placeholder="https://your-api.execute-api.us-east-1.amazonaws.com/prod" value="https://your-api.execute-api.us-east-1.amazonaws.com/prod">
+      <label>User Pool ID:</label>
+      <input type="text" id="userPoolId" placeholder="us-east-1_XXXXXXXXX" value="us-east-1_XXXXXXXXX">
+      <label>Client ID:</label>
+      <input type="text" id="clientId" placeholder="xxxxxxxxxxxxxxxxxxxx" value="xxxxxxxxxxxxxxxxxxxx">
+      <label>Region:</label>
+      <input type="text" id="region" placeholder="us-east-1" value="us-east-1">
+      <label>Device ID:</label>
+      <input type="text" id="deviceId" placeholder="macos-capture-1" value="macos-capture-1">
+    </div>
+  </div>
+
+  <div class="section hidden" id="passwordChangeSection">
+    <h2>Change Password</h2>
+    <p>First time login - please change your password</p>
+    <input type="password" id="newPassword" placeholder="New Password">
+    <input type="password" id="confirmPassword" placeholder="Confirm Password">
+    <button id="changePasswordBtn">Change Password</button>
+    <div class="status" id="passwordStatus"></div>
+  </div>
+
+  <div class="section hidden" id="sessionSection">
+    <h2>Session Management</h2>
+    
+    <div id="sessionListView">
+      <button id="refreshSessionsBtn">Refresh Sessions</button>
+      <button id="newSessionBtn">New Session</button>
+      <div id="sessionsList" style="margin-top: 10px;"></div>
+    </div>
+
+    <div id="newSessionView" class="hidden">
+      <input type="text" id="sessionName" placeholder="Session Name (optional)">
+      <button id="createSessionBtn">Create Session</button>
+      <button id="cancelNewBtn">Cancel</button>
+    </div>
+
+    <div id="activeSessionView" class="hidden">
+      <div class="status" id="sessionStatus">No active session</div>
+      <div class="qr-code" id="qrCode"></div>
+      <button id="endSessionBtn">End Session</button>
+    </div>
+
+    <button id="logoutBtn" style="margin-top: 20px;">Logout</button>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+
+    const loginSection = document.getElementById('loginSection');
+    const passwordChangeSection = document.getElementById('passwordChangeSection');
+    const sessionSection = document.getElementById('sessionSection');
+    const configSection = document.getElementById('configSection');
+    const sessionListView = document.getElementById('sessionListView');
+    const newSessionView = document.getElementById('newSessionView');
+    const activeSessionView = document.getElementById('activeSessionView');
+
+    let currentSessionId = null;
+
+    // Load saved config on startup
+    (async () => {
+      const config = await ipcRenderer.invoke('load-config');
+      if (config) {
+        document.getElementById('endpoint').value = config.endpoint;
+        document.getElementById('userPoolId').value = config.userPoolId;
+        document.getElementById('clientId').value = config.clientId;
+        document.getElementById('region').value = config.region;
+        document.getElementById('deviceId').value = config.deviceId;
+      }
+    })();
+
+    function toggleConfig() {
+      configSection.classList.toggle('hidden');
+    }
+
+    function getConfig() {
+      return {
+        endpoint: document.getElementById('endpoint').value,
+        userPoolId: document.getElementById('userPoolId').value,
+        clientId: document.getElementById('clientId').value,
+        region: document.getElementById('region').value,
+        deviceId: document.getElementById('deviceId').value,
+      };
+    }
+
+    async function saveCurrentConfig() {
+      const config = getConfig();
+      await ipcRenderer.invoke('save-config', config);
+    }
+
+    async function loadSessions() {
+      try {
+        const result = await ipcRenderer.invoke('list-sessions');
+        const sessionsList = document.getElementById('sessionsList');
+        
+        const activeSessions = result.sessions.filter(s => s.status !== 'ended');
+        
+        if (activeSessions.length === 0) {
+          sessionsList.innerHTML = '<div style="padding: 10px; color: #666;">No active sessions found</div>';
+          return;
+        }
+
+        sessionsList.innerHTML = activeSessions.map(s => `
+          <div style="border: 1px solid #ddd; padding: 10px; margin: 5px 0; border-radius: 6px;">
+            <strong>${s.sessionName}</strong> (${s.status})
+            <br><small>${s.sourceLanguage} → ${s.targetLanguages.join(', ')}</small>
+            <br><small>Participants: ${s.participantCount}</small>
+            ${s.status === 'started' || s.status === 'paused' ? `
+              <button onclick="joinSession('${s.sessionId}')" style="margin-top: 5px;">Join</button>
+              <button onclick="endSession('${s.sessionId}')" style="margin-top: 5px; background: #dc3545;">End</button>
+            ` : ''}
+          </div>
+        `).join('');
+      } catch (err) {
+        document.getElementById('sessionsList').innerHTML = `<div style="color: red;">Error: ${err.message}</div>`;
+      }
+    }
+
+    async function joinSession(sessionId) {
+      try {
+        const session = await ipcRenderer.invoke('join-session', sessionId);
+        currentSessionId = sessionId;
+        
+        sessionListView.classList.add('hidden');
+        activeSessionView.classList.remove('hidden');
+        
+        document.getElementById('sessionStatus').textContent = `Joined: ${session.sessionName || sessionId}`;
+        document.getElementById('sessionStatus').style.background = '#d4edda';
+      } catch (err) {
+        alert('Error joining session: ' + err.message);
+      }
+    }
+
+    async function endSession(sessionId) {
+      if (!confirm('End this session?')) return;
+      
+      try {
+        await ipcRenderer.invoke('stop-session', sessionId);
+        await loadSessions();
+      } catch (err) {
+        alert('Error ending session: ' + err.message);
+      }
+    }
+
+    document.getElementById('loginBtn').addEventListener('click', async () => {
+      try {
+        await saveCurrentConfig();
+        
+        const config = getConfig();
+        const credentials = {
+          ...config,
+          username: document.getElementById('username').value,
+          password: document.getElementById('password').value,
+        };
+
+        await ipcRenderer.invoke('login', credentials);
+        
+        loginSection.classList.add('hidden');
+        sessionSection.classList.remove('hidden');
+        await loadSessions();
+      } catch (err) {
+        if (err.message.includes('Password change required')) {
+          loginSection.classList.add('hidden');
+          passwordChangeSection.classList.remove('hidden');
+        } else {
+          document.getElementById('loginStatus').textContent = 'Error: ' + err.message;
+          document.getElementById('loginStatus').style.background = '#f8d7da';
+        }
+      }
+    });
+
+    document.getElementById('changePasswordBtn').addEventListener('click', async () => {
+      const newPass = document.getElementById('newPassword').value;
+      const confirmPass = document.getElementById('confirmPassword').value;
+
+      if (newPass !== confirmPass) {
+        document.getElementById('passwordStatus').textContent = 'Passwords do not match';
+        document.getElementById('passwordStatus').style.background = '#f8d7da';
+        return;
+      }
+
+      try {
+        await saveCurrentConfig();
+        
+        const config = getConfig();
+        const credentials = {
+          ...config,
+          username: document.getElementById('username').value,
+          oldPassword: document.getElementById('password').value,
+          newPassword: newPass,
+        };
+
+        await ipcRenderer.invoke('change-password', credentials);
+        
+        passwordChangeSection.classList.add('hidden');
+        sessionSection.classList.remove('hidden');
+        await loadSessions();
+      } catch (err) {
+        document.getElementById('passwordStatus').textContent = 'Error: ' + err.message;
+        document.getElementById('passwordStatus').style.background = '#f8d7da';
+      }
+    });
+
+    document.getElementById('refreshSessionsBtn').addEventListener('click', loadSessions);
+
+    document.getElementById('newSessionBtn').addEventListener('click', () => {
+      sessionListView.classList.add('hidden');
+      newSessionView.classList.remove('hidden');
+    });
+
+    document.getElementById('cancelNewBtn').addEventListener('click', () => {
+      newSessionView.classList.add('hidden');
+      sessionListView.classList.remove('hidden');
+    });
+
+    document.getElementById('createSessionBtn').addEventListener('click', async () => {
+      try {
+        const sessionConfig = {
+          sessionName: document.getElementById('sessionName').value || undefined,
+          sourceLanguage: 'pt',
+          targetLanguages: ['en', 'fr', 'es', 'de', 'it'],
+          audioConfig: {
+            sampleRate: 16000,
+            encoding: 'pcm',
+            channels: 1,
+          },
+        };
+
+        const session = await ipcRenderer.invoke('start-session', sessionConfig);
+        currentSessionId = session.sessionId;
+        
+        newSessionView.classList.add('hidden');
+        activeSessionView.classList.remove('hidden');
+        
+        document.getElementById('sessionStatus').textContent = `Session: ${session.sessionName || session.sessionId}`;
+        document.getElementById('sessionStatus').style.background = '#d4edda';
+        
+        if (session.qrCode) {
+          document.getElementById('qrCode').innerHTML = `
+            <img src="${session.qrCode}" alt="QR Code">
+            <p>Scan to join: ${session.shortUrl}</p>
+          `;
+        }
+      } catch (err) {
+        alert('Error creating session: ' + err.message);
+      }
+    });
+
+    document.getElementById('endSessionBtn').addEventListener('click', async () => {
+      try {
+        await ipcRenderer.invoke('stop-session', currentSessionId);
+        currentSessionId = null;
+        
+        activeSessionView.classList.add('hidden');
+        sessionListView.classList.remove('hidden');
+        document.getElementById('qrCode').innerHTML = '';
+        
+        await loadSessions();
+      } catch (err) {
+        alert('Error ending session: ' + err.message);
+      }
+    });
+
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+      await ipcRenderer.invoke('disconnect');
+      sessionSection.classList.add('hidden');
+      loginSection.classList.remove('hidden');
+      document.getElementById('loginStatus').textContent = 'Please login';
+      document.getElementById('loginStatus').style.background = '#f0f0f0';
+      document.getElementById('password').value = '';
+      
+      sessionListView.classList.remove('hidden');
+      newSessionView.classList.add('hidden');
+      activeSessionView.classList.add('hidden');
+    });
+  </script>
+</body>
+</html>
