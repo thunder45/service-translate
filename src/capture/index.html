@@ -63,6 +63,52 @@
       text-decoration: underline;
       font-size: 12px;
     }
+    .vu-meter {
+      width: 100%;
+      height: 40px;
+      background: #f0f0f0;
+      border-radius: 6px;
+      overflow: hidden;
+      position: relative;
+      margin: 10px 0;
+    }
+    .vu-meter-bar {
+      height: 100%;
+      background: linear-gradient(to right, #4CAF50, #FFC107, #F44336);
+      width: 0%;
+      transition: width 0.1s;
+    }
+    .stats {
+      font-size: 12px;
+      color: #666;
+      margin: 10px 0;
+      font-family: monospace;
+    }
+    .tabs {
+      display: flex;
+      border-bottom: 2px solid #ddd;
+      margin-top: 10px;
+    }
+    .tab {
+      padding: 8px 16px;
+      cursor: pointer;
+      border: none;
+      background: none;
+      font-size: 14px;
+      color: #666;
+    }
+    .tab.active {
+      color: #007AFF;
+      border-bottom: 2px solid #007AFF;
+      margin-bottom: -2px;
+    }
+    .tab-content {
+      display: none;
+      padding: 10px 0;
+    }
+    .tab-content.active {
+      display: block;
+    }
   </style>
 </head>
 <body>
@@ -116,6 +162,22 @@
 
     <div id="activeSessionView" class="hidden">
       <div class="status" id="sessionStatus">No active session</div>
+      
+      <div class="vu-meter">
+        <div class="vu-meter-bar" id="vuMeterBar"></div>
+      </div>
+      
+      <div class="stats" id="audioStats">
+        Audio: 0 KB sent | 0 chunks | Level: 0%
+      </div>
+      
+      <label>Texto Original:</label>
+      <textarea id="sourceText" readonly style="width: 100%; height: 80px; font-family: monospace; font-size: 12px; padding: 8px; border: 1px solid #ddd; border-radius: 6px; resize: vertical; margin-bottom: 10px;"></textarea>
+      
+      <label>Traduções:</label>
+      <div class="tabs" id="translationTabs"></div>
+      <div id="translationTabsContent"></div>
+      
       <div class="qr-code" id="qrCode"></div>
       <button id="endSessionBtn">End Session</button>
     </div>
@@ -135,6 +197,94 @@
     const activeSessionView = document.getElementById('activeSessionView');
 
     let currentSessionId = null;
+    let currentAudioLevel = 0;
+    let currentStats = { totalBytes: 0, chunks: 0, lastChunkSize: 0 };
+
+    // Listen for audio level updates
+    ipcRenderer.on('audio-level', (_, level) => {
+      currentAudioLevel = level;
+      const vuBar = document.getElementById('vuMeterBar');
+      if (vuBar) {
+        vuBar.style.width = `${level}%`;
+      }
+      updateStatsDisplay();
+    });
+
+    // Listen for audio stats updates
+    ipcRenderer.on('audio-stats', (_, stats) => {
+      currentStats = stats;
+      updateStatsDisplay();
+    });
+
+    // Listen for translation messages
+    ipcRenderer.on('translation', (_, message) => {
+      const sourceTextArea = document.getElementById('sourceText');
+      
+      if (sourceTextArea && message.metadata?.sourceText) {
+        const text = message.metadata.sourceText;
+        const endsWithPunctuation = /[.!?]$/.test(text.trim());
+        
+        if (endsWithPunctuation || !sourceTextArea.value) {
+          sourceTextArea.value += (sourceTextArea.value ? '\n' : '') + text;
+        } else {
+          sourceTextArea.value += ' ' + text;
+        }
+        sourceTextArea.scrollTop = sourceTextArea.scrollHeight;
+      }
+      
+      if (message.translatedTexts) {
+        const tabsContainer = document.getElementById('translationTabs');
+        const contentContainer = document.getElementById('translationTabsContent');
+        
+        message.translatedTexts.forEach((trans, idx) => {
+          let tab = document.querySelector(`[data-lang="${trans.targetLanguage}"]`);
+          let content = document.getElementById(`tab-${trans.targetLanguage}`);
+          
+          if (!tab) {
+            tab = document.createElement('button');
+            tab.className = idx === 0 ? 'tab active' : 'tab';
+            tab.textContent = trans.targetLanguage.toUpperCase();
+            tab.dataset.lang = trans.targetLanguage;
+            tab.onclick = () => switchTab(trans.targetLanguage);
+            tabsContainer.appendChild(tab);
+            
+            content = document.createElement('div');
+            content.id = `tab-${trans.targetLanguage}`;
+            content.className = idx === 0 ? 'tab-content active' : 'tab-content';
+            content.innerHTML = `<textarea readonly style="width: 100%; height: 150px; font-family: monospace; font-size: 12px; padding: 8px; border: 1px solid #ddd; border-radius: 6px; resize: vertical;"></textarea>`;
+            contentContainer.appendChild(content);
+          }
+          
+          const textarea = content.querySelector('textarea');
+          if (textarea) {
+            const text = trans.text;
+            const endsWithPunctuation = /[.!?]$/.test(text.trim());
+            
+            if (endsWithPunctuation || !textarea.value) {
+              textarea.value += (textarea.value ? '\n' : '') + text;
+            } else {
+              textarea.value += ' ' + text;
+            }
+            textarea.scrollTop = textarea.scrollHeight;
+          }
+        });
+      }
+    });
+
+    function switchTab(lang) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      document.querySelector(`[data-lang="${lang}"]`).classList.add('active');
+      document.getElementById(`tab-${lang}`).classList.add('active');
+    }
+
+    function updateStatsDisplay() {
+      const statsEl = document.getElementById('audioStats');
+      if (statsEl) {
+        const kb = (currentStats.totalBytes / 1024).toFixed(1);
+        statsEl.textContent = `Audio: ${kb} KB sent | ${currentStats.chunks} chunks | Level: ${currentAudioLevel.toFixed(0)}%`;
+      }
+    }
 
     // Load saved config on startup
     (async () => {
@@ -145,6 +295,14 @@
         document.getElementById('clientId').value = config.clientId;
         document.getElementById('region').value = config.region;
         document.getElementById('deviceId').value = config.deviceId;
+      }
+      
+      // Check for saved auth token
+      const auth = await ipcRenderer.invoke('check-auth');
+      if (auth.authenticated) {
+        loginSection.classList.add('hidden');
+        sessionSection.classList.remove('hidden');
+        await loadSessions();
       }
     })();
 

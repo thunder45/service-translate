@@ -10,9 +10,14 @@ export class WebSocketClient {
   private ws: WebSocket | null = null;
   private config: Config;
   private sequenceNumber = 0;
+  private messageCallback?: (message: any) => void;
 
   constructor(config: Config) {
     this.config = config;
+  }
+
+  setMessageCallback(callback: (message: any) => void): void {
+    this.messageCallback = callback;
   }
 
   async connect(): Promise<void> {
@@ -118,5 +123,10 @@ export class WebSocketClient {
   private handleMessage(data: WebSocket.Data): void {
     const message = JSON.parse(data.toString());
     console.log('Received:', message);
+    
+    // Emit translation messages to renderer
+    if (message.type === 'translation' && this.messageCallback) {
+      this.messageCallback(message);
+    }
   }
 }

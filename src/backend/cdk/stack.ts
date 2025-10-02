@@ -102,6 +102,8 @@ export class ServiceTranslateStack extends cdk.Stack {
       environment: {
         CONNECTIONS_TABLE: connectionsTable.tableName,
         SESSIONS_TABLE: sessionsTable.tableName,
+        TERMINOLOGY_TABLE: terminologyTable.tableName,
+        WEBSOCKET_API_ENDPOINT: '',
       },
       timeout: cdk.Duration.seconds(60),
       memorySize: 512,
@@ -157,6 +159,7 @@ export class ServiceTranslateStack extends cdk.Stack {
       code: lambdaCode,
       environment: {
         TERMINOLOGY_TABLE: terminologyTable.tableName,
+        WEBSOCKET_API_ENDPOINT: '',
       },
       timeout: cdk.Duration.seconds(30),
     });
@@ -194,6 +197,7 @@ export class ServiceTranslateStack extends cdk.Stack {
     sessionsTable.grantReadWriteData(listSessionsHandler);
 
     terminologyTable.grantReadWriteData(addTerminologyHandler);
+    terminologyTable.grantReadData(audioStreamHandler);
 
     // Grant Transcribe and Translate permissions
     audioStreamHandler.addToRolePolicy(new iam.PolicyStatement({
@@ -257,7 +261,7 @@ export class ServiceTranslateStack extends cdk.Stack {
     });
 
     [startSessionHandler, audioStreamHandler, endSessionHandler, 
-     joinSessionHandler, setLanguageHandler, leaveSessionHandler, listSessionsHandler].forEach(fn => {
+     joinSessionHandler, setLanguageHandler, leaveSessionHandler, listSessionsHandler, addTerminologyHandler].forEach(fn => {
       fn.addToRolePolicy(apiManagementPolicy);
       fn.addEnvironment('WEBSOCKET_API_ENDPOINT', stage.url);
     });
