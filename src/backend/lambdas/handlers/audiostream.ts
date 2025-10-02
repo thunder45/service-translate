@@ -95,9 +95,9 @@ export const handler: APIGatewayProxyWebsocketHandlerV2 = async (event) => {
     // Process when buffer reaches threshold or last chunk
     const buffer = audioBuffers.get(sessionId)!;
     const bufferSize = buffer.reduce((sum, chunk) => sum + chunk.length, 0);
-    console.log(`Buffer size: ${bufferSize} bytes, threshold: 8192`);
+    console.log(`Buffer size: ${bufferSize} bytes, threshold: 64000`);
     
-    if (bufferSize >= 8192 || isLastChunk) {
+    if (bufferSize >= 64000 || isLastChunk) {
       const audioBuffer = Buffer.concat(buffer);
       audioBuffers.set(sessionId, []);
 
