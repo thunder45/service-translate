@@ -1,35 +1,84 @@
 import { app, BrowserWindow, ipcMain, safeStorage } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
-import { AudioCapture } from './audio-capture';
-import { WebSocketClient } from './websocket-client';
 import { CognitoAuth } from './auth';
+import { DirectStreamingManager } from './direct-streaming-manager';
 import { loadConfig, saveConfig } from './config';
 
-const TOKEN_FILE = path.join(app.getPath('userData'), 'auth-token.enc');
-
 let mainWindow: BrowserWindow | null = null;
-let audioCapture: AudioCapture | null = null;
-let wsClient: WebSocketClient | null = null;
 let cognitoAuth: CognitoAuth | null = null;
+let streamingManager: DirectStreamingManager | null = null;
+
+interface StoredCredentials {
+  username: string;
+  token: string;
+  expiresAt: number;
+}
+
+function storeCredentials(username: string, token: string): void {
+  const credentials: StoredCredentials = {
+    username,
+    token,
+    expiresAt: Date.now() + (24 * 60 * 60 * 1000) // 24 hours
+  };
+  
+  if (safeStorage.isEncryptionAvailable()) {
+    const encrypted = safeStorage.encryptString(JSON.stringify(credentials));
+    const credentialsPath = path.join(app.getPath('userData'), 'credentials.dat');
+    fs.writeFileSync(credentialsPath, encrypted);
+  }
+}
+
+function loadStoredCredentials(): StoredCredentials | null {
+  try {
+    const credentialsPath = path.join(app.getPath('userData'), 'credentials.dat');
+    if (!fs.existsSync(credentialsPath)) return null;
+    
+    if (safeStorage.isEncryptionAvailable()) {
+      const encrypted = fs.readFileSync(credentialsPath);
+      const decrypted = safeStorage.decryptString(encrypted);
+      const credentials: StoredCredentials = JSON.parse(decrypted);
+      
+      if (credentials.expiresAt > Date.now()) {
+        return credentials;
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load stored credentials:', error);
+  }
+  return null;
+}
+
+function clearStoredCredentials(): void {
+  try {
+    const credentialsPath = path.join(app.getPath('userData'), 'credentials.dat');
+    if (fs.existsSync(credentialsPath)) {
+      fs.unlinkSync(credentialsPath);
+    }
+  } catch (error) {
+    console.error('Failed to clear stored credentials:', error);
+  }
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: 1200,
+    height: 800,
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, '../preload.js'),
     },
   });
 
-  mainWindow.loadFile('index.html');
+  mainWindow.loadFile(path.join(__dirname, '../index.html'));
+  
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
 }
 
-app.on('ready', createWindow);
+app.whenReady().then(createWindow);
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
@@ -37,72 +86,113 @@ app.on('window-all-closed', () => {
   }
 });
 
-function saveAuthToken(token: string, config: any) {
-  const data = {
-    token,
-    config,
-    expiresAt: Date.now() + (6 * 60 * 60 * 1000), // 6 hours
-  };
-  const encrypted = safeStorage.encryptString(JSON.stringify(data));
-  fs.writeFileSync(TOKEN_FILE, encrypted);
-}
-
-function loadAuthToken(): { token: string; config: any } | null {
-  try {
-    if (!fs.existsSync(TOKEN_FILE)) return null;
-    const encrypted = fs.readFileSync(TOKEN_FILE);
-    const decrypted = safeStorage.decryptString(encrypted);
-    const data = JSON.parse(decrypted);
-    
-    if (Date.now() > data.expiresAt) {
-      fs.unlinkSync(TOKEN_FILE);
-      return null;
-    }
-    
-    return { token: data.token, config: data.config };
-  } catch {
-    return null;
+app.on('activate', () => {
+  if (mainWindow === null) {
+    createWindow();
   }
-}
+});
 
-// IPC handlers
-ipcMain.handle('load-config', async () => {
+// Configuration management
+ipcMain.handle('load-config', () => {
   return loadConfig();
 });
 
-ipcMain.handle('save-config', async (_, config) => {
+ipcMain.handle('save-config', (_, config) => {
   saveConfig(config);
   return { success: true };
 });
 
-ipcMain.handle('check-auth', async () => {
-  const auth = loadAuthToken();
-  if (auth) {
-    (global as any).authToken = auth.token;
-    (global as any).wsConfig = auth.config;
-    return { authenticated: true, config: auth.config };
+// Authentication
+ipcMain.handle('check-stored-credentials', async () => {
+  const stored = loadStoredCredentials();
+  if (stored) {
+    (global as any).authToken = stored.token;
+    // Load config for stored credentials
+    const config = loadConfig();
+    if (config) {
+      (global as any).config = config;
+    }
+    return { success: true, username: stored.username };
   }
-  return { authenticated: false };
+  return { success: false };
+});
+
+ipcMain.handle('get-audio-devices', async () => {
+  try {
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    const { stdout } = await execAsync('system_profiler SPAudioDataType');
+    const devices = [{ id: 'default', name: 'Default System Input' }];
+    
+    const lines = stdout.split('\n');
+    let currentDevice = '';
+    let hasInput = false;
+    
+    for (const line of lines) {
+      // Device name (8 spaces + name + colon)
+      if (line.match(/^\s{8}[^:\s]+.*:$/)) {
+        // Save previous device if it had input
+        if (currentDevice && hasInput) {
+          devices.push({ 
+            id: `coreaudio:${devices.length - 1}`, 
+            name: currentDevice 
+          });
+        }
+        
+        currentDevice = line.trim().replace(':', '');
+        hasInput = false;
+      }
+      
+      // Check for input channels
+      if (line.includes('Input Channels:')) {
+        const match = line.match(/Input Channels:\s*(\d+)/);
+        if (match && parseInt(match[1]) > 0) {
+          hasInput = true;
+        }
+      }
+    }
+    
+    // Add last device if it has input
+    if (currentDevice && hasInput) {
+      devices.push({ 
+        id: `coreaudio:${devices.length - 1}`, 
+        name: currentDevice 
+      });
+    }
+    
+    return devices;
+  } catch (error) {
+    console.error('Audio device enumeration failed:', error);
+    return [{ id: 'default', name: 'Default System Input' }];
+  }
+});
+
+ipcMain.handle('logout', async () => {
+  clearStoredCredentials();
+  (global as any).authToken = null;
+  (global as any).config = null;
+  return { success: true };
 });
 
 ipcMain.handle('login', async (_, credentials) => {
-  cognitoAuth = new CognitoAuth({
-    userPoolId: credentials.userPoolId,
-    clientId: credentials.clientId,
-    region: credentials.region,
-  });
+  if (!cognitoAuth) {
+    cognitoAuth = new CognitoAuth({
+      userPoolId: credentials.userPoolId,
+      clientId: credentials.clientId,
+      region: credentials.region,
+    });
+  }
 
   const token = await cognitoAuth.login(credentials.username, credentials.password);
   
-  // Store config for later WebSocket connection
-  (global as any).authToken = token;
-  (global as any).wsConfig = {
-    endpoint: credentials.endpoint,
-    deviceId: credentials.deviceId,
-  };
+  // Store credentials securely
+  storeCredentials(credentials.username, token);
   
-  // Save encrypted token for 6 hours
-  saveAuthToken(token, (global as any).wsConfig);
+  // Store token globally for streaming manager
+  (global as any).authToken = token;
+  (global as any).config = credentials;
   
   return { success: true, token };
 });
@@ -122,105 +212,85 @@ ipcMain.handle('change-password', async (_, credentials) => {
     credentials.newPassword
   );
 
-  // Store config for later WebSocket connection
   (global as any).authToken = token;
-  (global as any).wsConfig = {
-    endpoint: credentials.endpoint,
-    deviceId: credentials.deviceId,
-  };
+  (global as any).config = credentials;
   
   return { success: true, token };
 });
 
-async function ensureWebSocketClient() {
-  if (!wsClient) {
-    const config = (global as any).wsConfig;
-    const token = (global as any).authToken;
-    
-    wsClient = new WebSocketClient({
-      endpoint: config.endpoint,
-      token,
-      deviceId: config.deviceId,
-    });
-    
-    wsClient.setMessageCallback((message) => {
-      mainWindow?.webContents.send('translation', message);
-    });
-    
-    await wsClient.connect();
+// Local streaming (no WebSocket)
+ipcMain.handle('start-local-streaming', async (_, options = {}) => {
+  const config = (global as any).config;
+  const token = (global as any).authToken;
+  
+  if (!config || !token) {
+    throw new Error('Configuration or authentication not found. Please login first.');
+  }
+  
+  streamingManager = new DirectStreamingManager({
+    region: config.region,
+    identityPoolId: config.identityPoolId,
+    userPoolId: config.userPoolId,
+    jwtToken: token,
+    sourceLanguage: 'pt-BR',
+    targetLanguages: ['en-US', 'es-ES', 'fr-FR', 'de-DE', 'it-IT'],
+    sampleRate: config.sampleRate || 16000,
+    audioDevice: options.audioDevice || 'default',
+  });
+
+  // Setup event handlers for local display
+  streamingManager.on('transcription', (result) => {
+    mainWindow?.webContents.send('transcription', result);
+  });
+
+  streamingManager.on('translation', (result) => {
+    mainWindow?.webContents.send('translation', result);
+  });
+
+  streamingManager.on('error', (error) => {
+    mainWindow?.webContents.send('streaming-error', error);
+  });
+
+  streamingManager.on('audio-level', (level) => {
+    mainWindow?.webContents.send('audio-level', level);
+  });
+
+  await streamingManager.startStreaming();
+  return { success: true };
+});
+
+ipcMain.handle('stop-local-streaming', async () => {
+  if (streamingManager) {
+    await streamingManager.stopStreaming();
+    streamingManager = null;
+  }
+  return { success: true };
+});
+
+// Token storage helpers
+function saveAuthToken(token: string, config: any) {
+  if (safeStorage.isEncryptionAvailable()) {
+    const encrypted = safeStorage.encryptString(JSON.stringify({ token, config, timestamp: Date.now() }));
+    const tokenPath = path.join(app.getPath('userData'), 'auth-token');
+    fs.writeFileSync(tokenPath, encrypted);
   }
 }
 
-ipcMain.handle('start-session', async (_, sessionConfig) => {
-  await ensureWebSocketClient();
-  
-  if (!wsClient) throw new Error('WebSocket not initialized');
-  const session = await wsClient.startSession(sessionConfig);
-  
-  // Start audio capture
-  audioCapture = new AudioCapture(sessionConfig.audioConfig);
-  
-  audioCapture.on('data', (audioData) => {
-    wsClient?.sendAudio(session.sessionId, audioData);
-  });
-  
-  audioCapture.on('level', (level) => {
-    mainWindow?.webContents.send('audio-level', level);
-  });
-  
-  audioCapture.on('stats', (stats) => {
-    mainWindow?.webContents.send('audio-stats', stats);
-  });
-  
-  audioCapture.start();
-  
-  return session;
-});
-
-ipcMain.handle('list-sessions', async () => {
-  await ensureWebSocketClient();
-  
-  if (!wsClient) throw new Error('WebSocket not initialized');
-  return await wsClient.listSessions();
-});
-
-ipcMain.handle('join-session', async (_, sessionId) => {
-  await ensureWebSocketClient();
-  
-  if (!wsClient) throw new Error('WebSocket not initialized');
-  const session = await wsClient.joinSession(sessionId);
-  
-  // Start audio capture with session's audio config
-  audioCapture = new AudioCapture(session.audioConfig);
-  
-  audioCapture.on('data', (audioData) => {
-    wsClient?.sendAudio(sessionId, audioData);
-  });
-  
-  audioCapture.on('level', (level) => {
-    mainWindow?.webContents.send('audio-level', level);
-  });
-  
-  audioCapture.on('stats', (stats) => {
-    mainWindow?.webContents.send('audio-stats', stats);
-  });
-  
-  audioCapture.start();
-  
-  return session;
-});
-
-ipcMain.handle('stop-session', async (_, sessionId) => {
-  audioCapture?.stop();
-  audioCapture = null;
-  await wsClient?.endSession(sessionId);
-  return { success: true };
-});
-
-ipcMain.handle('disconnect', async () => {
-  audioCapture?.stop();
-  wsClient?.disconnect();
-  audioCapture = null;
-  wsClient = null;
-  return { success: true };
-});
+function loadAuthToken() {
+  try {
+    const tokenPath = path.join(app.getPath('userData'), 'auth-token');
+    if (fs.existsSync(tokenPath)) {
+      const encrypted = fs.readFileSync(tokenPath);
+      const decrypted = safeStorage.decryptString(encrypted);
+      const data = JSON.parse(decrypted);
+      
+      // Check if token is less than 6 hours old
+      if (Date.now() - data.timestamp < 6 * 60 * 60 * 1000) {
+        return data;
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load auth token:', error);
+  }
+  return null;
+}

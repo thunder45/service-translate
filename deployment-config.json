@@ -1,0 +1,8 @@
+{
+  "userPoolId": "us-east-1_WoaXmyQLQ",
+  "clientId": "38t8057tbi0o6873qt441kuo3n",
+  "identityPoolId": "us-east-1:8a84f3fb-292e-4159-8e56-b6f238ff8d3a",
+  "region": "us-east-1",
+  "adminEmail": "admin@example.com",
+  "tempPassword": "TempPass123!"
+}

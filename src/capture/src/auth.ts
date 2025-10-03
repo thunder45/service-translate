@@ -31,7 +31,7 @@ export class CognitoAuth {
         throw new Error('Password change required. Please contact administrator.');
       }
 
-      return response.AuthenticationResult!.AccessToken!;
+      return response.AuthenticationResult!.IdToken!;
     } catch (error: any) {
       if (error.name === 'NotAuthorizedException') {
         throw new Error('Invalid username or password');
@@ -61,9 +61,9 @@ export class CognitoAuth {
         },
       }));
 
-      return challengeResponse.AuthenticationResult!.AccessToken!;
+      return challengeResponse.AuthenticationResult!.IdToken!;
     }
 
-    return response.AuthenticationResult!.AccessToken!;
+    return response.AuthenticationResult!.IdToken!;
   }
 }

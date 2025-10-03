@@ -7,10 +7,11 @@ const aws_jwt_verify_1 = require("aws-jwt-verify");
 const ddb = lib_dynamodb_1.DynamoDBDocumentClient.from(new client_dynamodb_1.DynamoDBClient({}));
 const CONNECTIONS_TABLE = process.env.CONNECTIONS_TABLE;
 const USER_POOL_ID = process.env.USER_POOL_ID;
+const USER_POOL_CLIENT_ID = process.env.USER_POOL_CLIENT_ID;
 const verifier = aws_jwt_verify_1.CognitoJwtVerifier.create({
     userPoolId: USER_POOL_ID,
     tokenUse: 'access',
-    clientId: null,
+    clientId: USER_POOL_CLIENT_ID, // Add client ID
 });
 const handler = async (event) => {
     const connectionId = event.requestContext.connectionId;
@@ -66,6 +67,7 @@ const handler = async (event) => {
             userId = payload.sub;
         }
         catch (error) {
+            console.error('JWT verification failed:', error);
             return {
                 statusCode: 403,
                 body: JSON.stringify({

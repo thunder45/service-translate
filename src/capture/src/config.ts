@@ -8,8 +8,15 @@ export interface AppConfig {
   endpoint: string;
   userPoolId: string;
   clientId: string;
+  identityPoolId: string;
   region: string;
   deviceId: string;
+  // Audio settings
+  inputDevice?: string;
+  sampleRate?: number;
+  encoding?: string;
+  channels?: number;
+  inputGain?: number;
 }
 
 export function loadConfig(): AppConfig | null {

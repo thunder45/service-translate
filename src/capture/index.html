@@ -1,515 +1,764 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Service Translate - Audio Capture</title>
-  <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      padding: 20px;
-      max-width: 600px;
-      margin: 0 auto;
-    }
-    .section {
-      margin: 20px 0;
-      padding: 15px;
-      border: 1px solid #ddd;
-      border-radius: 8px;
-    }
-    input, button {
-      padding: 8px 12px;
-      margin: 5px 0;
-      width: 100%;
-      box-sizing: border-box;
-    }
-    label {
-      display: block;
-      margin-top: 10px;
-      margin-bottom: 3px;
-      font-weight: 500;
-      font-size: 14px;
-      color: #333;
-    }
-    button {
-      background: #007AFF;
-      color: white;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-    }
-    button:disabled {
-      background: #ccc;
-      cursor: not-allowed;
-    }
-    .status {
-      padding: 10px;
-      margin: 10px 0;
-      border-radius: 6px;
-      background: #f0f0f0;
-    }
-    .qr-code {
-      text-align: center;
-      margin: 20px 0;
-    }
-    .qr-code img {
-      max-width: 300px;
-    }
-    .hidden {
-      display: none;
-    }
-    .config-link {
-      color: #007AFF;
-      cursor: pointer;
-      text-decoration: underline;
-      font-size: 12px;
-    }
-    .vu-meter {
-      width: 100%;
-      height: 40px;
-      background: #f0f0f0;
-      border-radius: 6px;
-      overflow: hidden;
-      position: relative;
-      margin: 10px 0;
-    }
-    .vu-meter-bar {
-      height: 100%;
-      background: linear-gradient(to right, #4CAF50, #FFC107, #F44336);
-      width: 0%;
-      transition: width 0.1s;
-    }
-    .stats {
-      font-size: 12px;
-      color: #666;
-      margin: 10px 0;
-      font-family: monospace;
-    }
-    .tabs {
-      display: flex;
-      border-bottom: 2px solid #ddd;
-      margin-top: 10px;
-    }
-    .tab {
-      padding: 8px 16px;
-      cursor: pointer;
-      border: none;
-      background: none;
-      font-size: 14px;
-      color: #666;
-    }
-    .tab.active {
-      color: #007AFF;
-      border-bottom: 2px solid #007AFF;
-      margin-bottom: -2px;
-    }
-    .tab-content {
-      display: none;
-      padding: 10px 0;
-    }
-    .tab-content.active {
-      display: block;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Service Translate - Local Audio Processing</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .login-form {
+            display: grid;
+            gap: 15px;
+            max-width: 400px;
+            margin: 0 auto;
+        }
+        
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        label {
+            font-weight: 500;
+            font-size: 14px;
+        }
+        
+        input, button, select {
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        
+        input, select {
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+        }
+        
+        input[type="range"] {
+            background: rgba(255, 255, 255, 0.3);
+            height: 6px;
+            padding: 0;
+        }
+        
+        #gainValue {
+            margin-left: 10px;
+            font-weight: 500;
+        }
+        
+        button {
+            background: #4CAF50;
+            color: white;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background 0.3s;
+        }
+        
+        button:hover {
+            background: #45a049;
+        }
+        
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        
+        .streaming-controls {
+            text-align: center;
+            margin-bottom: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 30px;
+        }
+        
+        .vu-meter {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .vu-meter-label {
+            font-size: 12px;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.8);
+        }
+        
+        .vu-meter-bars {
+            display: flex;
+            gap: 2px;
+            height: 60px;
+            align-items: flex-end;
+        }
+        
+        .vu-bar {
+            width: 4px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 2px;
+            transition: all 0.1s ease;
+        }
+        
+        .vu-bar.active {
+            background: linear-gradient(to top, #4CAF50 0%, #FFC107 70%, #f44336 100%);
+        }
+        
+        .start-btn {
+            background: #2196F3;
+            font-size: 16px;
+            padding: 15px 30px;
+        }
+        
+        .stop-btn {
+            background: #f44336;
+        }
+        
+        .results-container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .transcription-panel {
+            min-height: 200px;
+        }
+        
+        .translation-panel {
+            min-height: 300px;
+        }
+        
+        .translation-tabs {
+            display: flex;
+            margin-bottom: 15px;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .tab-button {
+            background: none;
+            border: none;
+            color: rgba(255, 255, 255, 0.7);
+            padding: 10px 20px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            border-bottom: 2px solid transparent;
+            transition: all 0.3s;
+        }
+        
+        .tab-button.active {
+            color: white;
+            border-bottom-color: #FFD700;
+        }
+        
+        .tab-button:hover {
+            color: white;
+            background: rgba(255, 255, 255, 0.1);
+        }
+        
+        .tab-content {
+            display: none;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            padding: 15px;
+            min-height: 200px;
+            max-height: 300px;
+            font-size: 16px;
+            line-height: 1.5;
+            overflow-y: auto;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .panel-header {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        
+        .text-content {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            padding: 15px;
+            min-height: 200px;
+            max-height: 300px;
+            font-size: 16px;
+            line-height: 1.5;
+            overflow-y: auto;
+        }
+        
+        .translation-item {
+            margin-bottom: 15px;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+        }
+        
+        .translation-lang {
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 5px;
+            color: #FFD700;
+        }
+        
+        .status {
+            text-align: center;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-weight: 500;
+        }
+        
+        .status.success {
+            background: rgba(76, 175, 80, 0.3);
+        }
+        
+        .status.error {
+            background: rgba(244, 67, 54, 0.3);
+        }
+        
+        .status.info {
+            background: rgba(33, 150, 243, 0.3);
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .config-btn, .logout-btn {
+            position: absolute;
+            top: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 8px 15px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        
+        .logout-btn {
+            right: 20px;
+        }
+        
+        .config-btn {
+            right: 140px;
+        }
+    </style>
 </head>
 <body>
-  <h1>Service Translate - Audio Capture</h1>
-
-  <div class="section" id="loginSection">
-    <h2>Login</h2>
-    <input type="text" id="username" placeholder="Username (email)">
-    <input type="password" id="password" placeholder="Password">
-    <button id="loginBtn">Login</button>
-    <div class="status" id="loginStatus">Please login</div>
-    <div class="config-link" onclick="toggleConfig()">⚙️ Configuration</div>
-    
-    <div id="configSection" class="hidden" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ddd;">
-      <label>WebSocket Endpoint:</label>
-      <input type="text" id="endpoint" placeholder="https://your-api.execute-api.us-east-1.amazonaws.com/prod" value="https://your-api.execute-api.us-east-1.amazonaws.com/prod">
-      <label>User Pool ID:</label>
-      <input type="text" id="userPoolId" placeholder="us-east-1_XXXXXXXXX" value="us-east-1_XXXXXXXXX">
-      <label>Client ID:</label>
-      <input type="text" id="clientId" placeholder="xxxxxxxxxxxxxxxxxxxx" value="xxxxxxxxxxxxxxxxxxxx">
-      <label>Region:</label>
-      <input type="text" id="region" placeholder="us-east-1" value="us-east-1">
-      <label>Device ID:</label>
-      <input type="text" id="deviceId" placeholder="macos-capture-1" value="macos-capture-1">
-    </div>
-  </div>
-
-  <div class="section hidden" id="passwordChangeSection">
-    <h2>Change Password</h2>
-    <p>First time login - please change your password</p>
-    <input type="password" id="newPassword" placeholder="New Password">
-    <input type="password" id="confirmPassword" placeholder="Confirm Password">
-    <button id="changePasswordBtn">Change Password</button>
-    <div class="status" id="passwordStatus"></div>
-  </div>
-
-  <div class="section hidden" id="sessionSection">
-    <h2>Session Management</h2>
-    
-    <div id="sessionListView">
-      <button id="refreshSessionsBtn">Refresh Sessions</button>
-      <button id="newSessionBtn">New Session</button>
-      <div id="sessionsList" style="margin-top: 10px;"></div>
-    </div>
-
-    <div id="newSessionView" class="hidden">
-      <input type="text" id="sessionName" placeholder="Session Name (optional)">
-      <button id="createSessionBtn">Create Session</button>
-      <button id="cancelNewBtn">Cancel</button>
-    </div>
-
-    <div id="activeSessionView" class="hidden">
-      <div class="status" id="sessionStatus">No active session</div>
-      
-      <div class="vu-meter">
-        <div class="vu-meter-bar" id="vuMeterBar"></div>
-      </div>
-      
-      <div class="stats" id="audioStats">
-        Audio: 0 KB sent | 0 chunks | Level: 0%
-      </div>
-      
-      <label>Texto Original:</label>
-      <textarea id="sourceText" readonly style="width: 100%; height: 80px; font-family: monospace; font-size: 12px; padding: 8px; border: 1px solid #ddd; border-radius: 6px; resize: vertical; margin-bottom: 10px;"></textarea>
-      
-      <label>Traduções:</label>
-      <div class="tabs" id="translationTabs"></div>
-      <div id="translationTabsContent"></div>
-      
-      <div class="qr-code" id="qrCode"></div>
-      <button id="endSessionBtn">End Session</button>
-    </div>
-
-    <button id="logoutBtn" style="margin-top: 20px;">Logout</button>
-  </div>
-
-  <script>
-    const { ipcRenderer } = require('electron');
-
-    const loginSection = document.getElementById('loginSection');
-    const passwordChangeSection = document.getElementById('passwordChangeSection');
-    const sessionSection = document.getElementById('sessionSection');
-    const configSection = document.getElementById('configSection');
-    const sessionListView = document.getElementById('sessionListView');
-    const newSessionView = document.getElementById('newSessionView');
-    const activeSessionView = document.getElementById('activeSessionView');
-
-    let currentSessionId = null;
-    let currentAudioLevel = 0;
-    let currentStats = { totalBytes: 0, chunks: 0, lastChunkSize: 0 };
-
-    // Listen for audio level updates
-    ipcRenderer.on('audio-level', (_, level) => {
-      currentAudioLevel = level;
-      const vuBar = document.getElementById('vuMeterBar');
-      if (vuBar) {
-        vuBar.style.width = `${level}%`;
-      }
-      updateStatsDisplay();
-    });
-
-    // Listen for audio stats updates
-    ipcRenderer.on('audio-stats', (_, stats) => {
-      currentStats = stats;
-      updateStatsDisplay();
-    });
-
-    // Listen for translation messages
-    ipcRenderer.on('translation', (_, message) => {
-      const sourceTextArea = document.getElementById('sourceText');
-      
-      if (sourceTextArea && message.metadata?.sourceText) {
-        const text = message.metadata.sourceText;
-        const endsWithPunctuation = /[.!?]$/.test(text.trim());
+    <div class="container">
+        <button class="config-btn" onclick="showConfig()">⚙️ Configuration</button>
+        <button class="logout-btn hidden" onclick="logout()" id="logout-btn">🚪➡️ Logout</button>
         
-        if (endsWithPunctuation || !sourceTextArea.value) {
-          sourceTextArea.value += (sourceTextArea.value ? '\n' : '') + text;
-        } else {
-          sourceTextArea.value += ' ' + text;
-        }
-        sourceTextArea.scrollTop = sourceTextArea.scrollHeight;
-      }
-      
-      if (message.translatedTexts) {
-        const tabsContainer = document.getElementById('translationTabs');
-        const contentContainer = document.getElementById('translationTabsContent');
-        
-        message.translatedTexts.forEach((trans, idx) => {
-          let tab = document.querySelector(`[data-lang="${trans.targetLanguage}"]`);
-          let content = document.getElementById(`tab-${trans.targetLanguage}`);
-          
-          if (!tab) {
-            tab = document.createElement('button');
-            tab.className = idx === 0 ? 'tab active' : 'tab';
-            tab.textContent = trans.targetLanguage.toUpperCase();
-            tab.dataset.lang = trans.targetLanguage;
-            tab.onclick = () => switchTab(trans.targetLanguage);
-            tabsContainer.appendChild(tab);
+        <div class="header">
+            <h1>🎤 Service Translate</h1>
+            <p>Local Real-Time Audio Translation</p>
+        </div>
+
+        <!-- Configuration Panel -->
+        <div id="config-panel" class="card hidden">
+            <h2>Configuration</h2>
+            <div class="translation-tabs">
+                <button class="tab-button active" onclick="switchConfigTab('connection')">🔗 Connection</button>
+                <button class="tab-button" onclick="switchConfigTab('audio')">🎤 Audio</button>
+            </div>
             
-            content = document.createElement('div');
-            content.id = `tab-${trans.targetLanguage}`;
-            content.className = idx === 0 ? 'tab-content active' : 'tab-content';
-            content.innerHTML = `<textarea readonly style="width: 100%; height: 150px; font-family: monospace; font-size: 12px; padding: 8px; border: 1px solid #ddd; border-radius: 6px; resize: vertical;"></textarea>`;
-            contentContainer.appendChild(content);
-          }
-          
-          const textarea = content.querySelector('textarea');
-          if (textarea) {
-            const text = trans.text;
-            const endsWithPunctuation = /[.!?]$/.test(text.trim());
+            <div class="tab-content active" id="config-connection">
+                <div class="login-form">
+                    <div class="form-group">
+                        <label>WebSocket Endpoint:</label>
+                        <input type="text" id="endpoint" placeholder="wss://...">
+                    </div>
+                    <div class="form-group">
+                        <label>User Pool ID:</label>
+                        <input type="text" id="userPoolId" placeholder="us-east-1_...">
+                    </div>
+                    <div class="form-group">
+                        <label>Client ID:</label>
+                        <input type="text" id="clientId" placeholder="...">
+                    </div>
+                    <div class="form-group">
+                        <label>Identity Pool ID:</label>
+                        <input type="text" id="identityPoolId" placeholder="us-east-1:...">
+                    </div>
+                    <div class="form-group">
+                        <label>Region:</label>
+                        <input type="text" id="region" value="us-east-1">
+                    </div>
+                </div>
+            </div>
             
-            if (endsWithPunctuation || !textarea.value) {
-              textarea.value += (textarea.value ? '\n' : '') + text;
-            } else {
-              textarea.value += ' ' + text;
+            <div class="tab-content" id="config-audio">
+                <div class="login-form">
+                    <div class="form-group">
+                        <label>Input Device:</label>
+                        <select id="inputDevice">
+                            <option value="default">Default System Input</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Sample Rate:</label>
+                        <select id="sampleRate">
+                            <option value="16000" selected>16 kHz (Recommended)</option>
+                            <option value="8000">8 kHz</option>
+                            <option value="22050">22.05 kHz</option>
+                            <option value="44100">44.1 kHz</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Encoding:</label>
+                        <select id="encoding">
+                            <option value="signed-integer" selected>16-bit PCM (Recommended)</option>
+                            <option value="unsigned-integer">8-bit PCM</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Channels:</label>
+                        <select id="channels">
+                            <option value="1" selected>Mono (Recommended)</option>
+                            <option value="2">Stereo</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Input Gain:</label>
+                        <input type="range" id="inputGain" min="0" max="200" value="100" step="10">
+                        <span id="gainValue">100%</span>
+                    </div>
+                </div>
+            </div>
+            
+            <button onclick="saveConfig()" style="margin-top: 20px;">Save Configuration</button>
+        </div>
+
+        <!-- Login Panel -->
+        <div id="login-panel" class="card">
+            <h2>Admin Login</h2>
+            <div class="login-form">
+                <div class="form-group">
+                    <label>Username:</label>
+                    <input type="text" id="username" placeholder="admin@example.com" onkeypress="handleLoginKeyPress(event)">
+                </div>
+                <div class="form-group">
+                    <label>Password:</label>
+                    <input type="password" id="password" onkeypress="handleLoginKeyPress(event)">
+                </div>
+                <button onclick="login()" id="login-btn">Login</button>
+            </div>
+        </div>
+
+        <!-- Main Application -->
+        <div id="main-app" class="hidden">
+            <div id="status" class="status hidden"></div>
+            
+            <div class="streaming-controls">
+                <button class="start-btn" onclick="startStreaming()" id="start-btn">
+                    🎤 Start Local Streaming
+                </button>
+                <button class="stop-btn hidden" onclick="stopStreaming()" id="stop-btn">
+                    ⏹️ Stop Streaming
+                </button>
+                
+                <div class="vu-meter hidden" id="vu-meter">
+                    <div class="vu-meter-label">Audio Level</div>
+                    <div class="vu-meter-bars" id="vu-bars">
+                        <!-- VU bars will be generated by JavaScript -->
+                    </div>
+                </div>
+            </div>
+
+            <div class="results-container">
+                <div class="card translation-panel">
+                    <div class="panel-header">🌍 Translations</div>
+                    <div class="translation-tabs">
+                        <button class="tab-button active" onclick="switchTab('en-US')">🇺🇸 English</button>
+                        <button class="tab-button" onclick="switchTab('es-ES')">🇪🇸 Spanish</button>
+                        <button class="tab-button" onclick="switchTab('fr-FR')">🇫🇷 French</button>
+                        <button class="tab-button" onclick="switchTab('de-DE')">🇩🇪 German</button>
+                        <button class="tab-button" onclick="switchTab('it-IT')">🇮🇹 Italian</button>
+                    </div>
+                    <div class="tab-content active" id="tab-en-US">
+                        English translations will appear here...
+                    </div>
+                    <div class="tab-content" id="tab-es-ES">
+                        Spanish translations will appear here...
+                    </div>
+                    <div class="tab-content" id="tab-fr-FR">
+                        French translations will appear here...
+                    </div>
+                    <div class="tab-content" id="tab-de-DE">
+                        German translations will appear here...
+                    </div>
+                    <div class="tab-content" id="tab-it-IT">
+                        Italian translations will appear here...
+                    </div>
+                </div>
+
+                <div class="card transcription-panel">
+                    <div class="panel-header">🇵🇹 Portuguese (Original)</div>
+                    <div class="text-content" id="transcription-content">
+                        Waiting for audio...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let isLoggedIn = false;
+        let isStreaming = false;
+        let activeTab = 'en-US';
+        let vuBars = [];
+
+        function initializeVUMeter() {
+            const vuBarsContainer = document.getElementById('vu-bars');
+            vuBars = [];
+            
+            // Create 20 VU bars
+            for (let i = 0; i < 20; i++) {
+                const bar = document.createElement('div');
+                bar.className = 'vu-bar';
+                bar.style.height = '0%';
+                vuBarsContainer.appendChild(bar);
+                vuBars.push(bar);
             }
-            textarea.scrollTop = textarea.scrollHeight;
-          }
+        }
+
+        function updateVUMeter(level) {
+            if (!vuBars.length) return;
+            
+            // Convert level (0-100) to number of active bars
+            const activeBars = Math.floor((level / 100) * vuBars.length);
+            
+            vuBars.forEach((bar, index) => {
+                if (index < activeBars) {
+                    bar.classList.add('active');
+                    bar.style.height = '100%';
+                } else {
+                    bar.classList.remove('active');
+                    bar.style.height = '10%';
+                }
+            });
+        }
+
+        // Initialize VU meter on page load
+        document.addEventListener('DOMContentLoaded', initializeVUMeter);
+
+        function handleLoginKeyPress(event) {
+            if (event.key === 'Enter') {
+                login();
+            }
+        }
+
+        function switchConfigTab(tabName) {
+            // Update active tab button
+            document.querySelectorAll('#config-panel .tab-button').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            // Update active tab content
+            document.querySelectorAll('#config-panel .tab-content').forEach(content => content.classList.remove('active'));
+            document.getElementById(`config-${tabName}`).classList.add('active');
+        }
+
+        function switchTab(language) {
+            // Update active tab button
+            document.querySelectorAll('.translation-panel .tab-button').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            // Update active tab content
+            document.querySelectorAll('.translation-panel .tab-content').forEach(content => content.classList.remove('active'));
+            document.getElementById(`tab-${language}`).classList.add('active');
+            
+            activeTab = language;
+        }
+
+        // Load configuration on startup
+        window.electronAPI.loadConfig().then(config => {
+            if (config) {
+                // Connection tab
+                document.getElementById('endpoint').value = config.endpoint || '';
+                document.getElementById('userPoolId').value = config.userPoolId || '';
+                document.getElementById('clientId').value = config.clientId || '';
+                document.getElementById('identityPoolId').value = config.identityPoolId || '';
+                document.getElementById('region').value = config.region || 'us-east-1';
+                
+                // Audio tab
+                document.getElementById('inputDevice').value = config.inputDevice || 'default';
+                document.getElementById('sampleRate').value = config.sampleRate || '16000';
+                document.getElementById('encoding').value = config.encoding || 'signed-integer';
+                document.getElementById('channels').value = config.channels || '1';
+                document.getElementById('inputGain').value = config.inputGain || '100';
+                updateGainDisplay();
+            }
         });
-      }
-    });
 
-    function switchTab(lang) {
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-      document.querySelector(`[data-lang="${lang}"]`).classList.add('active');
-      document.getElementById(`tab-${lang}`).classList.add('active');
-    }
-
-    function updateStatsDisplay() {
-      const statsEl = document.getElementById('audioStats');
-      if (statsEl) {
-        const kb = (currentStats.totalBytes / 1024).toFixed(1);
-        statsEl.textContent = `Audio: ${kb} KB sent | ${currentStats.chunks} chunks | Level: ${currentAudioLevel.toFixed(0)}%`;
-      }
-    }
-
-    // Load saved config on startup
-    (async () => {
-      const config = await ipcRenderer.invoke('load-config');
-      if (config) {
-        document.getElementById('endpoint').value = config.endpoint;
-        document.getElementById('userPoolId').value = config.userPoolId;
-        document.getElementById('clientId').value = config.clientId;
-        document.getElementById('region').value = config.region;
-        document.getElementById('deviceId').value = config.deviceId;
-      }
-      
-      // Check for saved auth token
-      const auth = await ipcRenderer.invoke('check-auth');
-      if (auth.authenticated) {
-        loginSection.classList.add('hidden');
-        sessionSection.classList.remove('hidden');
-        await loadSessions();
-      }
-    })();
-
-    function toggleConfig() {
-      configSection.classList.toggle('hidden');
-    }
-
-    function getConfig() {
-      return {
-        endpoint: document.getElementById('endpoint').value,
-        userPoolId: document.getElementById('userPoolId').value,
-        clientId: document.getElementById('clientId').value,
-        region: document.getElementById('region').value,
-        deviceId: document.getElementById('deviceId').value,
-      };
-    }
-
-    async function saveCurrentConfig() {
-      const config = getConfig();
-      await ipcRenderer.invoke('save-config', config);
-    }
-
-    async function loadSessions() {
-      try {
-        const result = await ipcRenderer.invoke('list-sessions');
-        const sessionsList = document.getElementById('sessionsList');
-        
-        const activeSessions = result.sessions.filter(s => s.status !== 'ended');
-        
-        if (activeSessions.length === 0) {
-          sessionsList.innerHTML = '<div style="padding: 10px; color: #666;">No active sessions found</div>';
-          return;
+        function updateGainDisplay() {
+            const gainSlider = document.getElementById('inputGain');
+            const gainValue = document.getElementById('gainValue');
+            gainValue.textContent = gainSlider.value + '%';
         }
 
-        sessionsList.innerHTML = activeSessions.map(s => `
-          <div style="border: 1px solid #ddd; padding: 10px; margin: 5px 0; border-radius: 6px;">
-            <strong>${s.sessionName}</strong> (${s.status})
-            <br><small>${s.sourceLanguage} → ${s.targetLanguages.join(', ')}</small>
-            <br><small>Participants: ${s.participantCount}</small>
-            ${s.status === 'started' || s.status === 'paused' ? `
-              <button onclick="joinSession('${s.sessionId}')" style="margin-top: 5px;">Join</button>
-              <button onclick="endSession('${s.sessionId}')" style="margin-top: 5px; background: #dc3545;">End</button>
-            ` : ''}
-          </div>
-        `).join('');
-      } catch (err) {
-        document.getElementById('sessionsList').innerHTML = `<div style="color: red;">Error: ${err.message}</div>`;
-      }
-    }
+        // Update gain display when slider changes
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('inputGain').addEventListener('input', updateGainDisplay);
+        });
 
-    async function joinSession(sessionId) {
-      try {
-        const session = await ipcRenderer.invoke('join-session', sessionId);
-        currentSessionId = sessionId;
-        
-        sessionListView.classList.add('hidden');
-        activeSessionView.classList.remove('hidden');
-        
-        document.getElementById('sessionStatus').textContent = `Joined: ${session.sessionName || sessionId}`;
-        document.getElementById('sessionStatus').style.background = '#d4edda';
-      } catch (err) {
-        alert('Error joining session: ' + err.message);
-      }
-    }
+        // Check for stored credentials on startup
+        window.electronAPI.checkStoredCredentials().then(result => {
+            if (result.success) {
+                isLoggedIn = true;
+                document.getElementById('username').value = result.username;
+                document.getElementById('login-panel').classList.add('hidden');
+                document.getElementById('main-app').classList.remove('hidden');
+                document.getElementById('logout-btn').classList.remove('hidden');
+                showStatus('Welcome back! Ready for local streaming.', 'success');
+            }
+        });
 
-    async function endSession(sessionId) {
-      if (!confirm('End this session?')) return;
-      
-      try {
-        await ipcRenderer.invoke('stop-session', sessionId);
-        await loadSessions();
-      } catch (err) {
-        alert('Error ending session: ' + err.message);
-      }
-    }
-
-    document.getElementById('loginBtn').addEventListener('click', async () => {
-      try {
-        await saveCurrentConfig();
-        
-        const config = getConfig();
-        const credentials = {
-          ...config,
-          username: document.getElementById('username').value,
-          password: document.getElementById('password').value,
-        };
-
-        await ipcRenderer.invoke('login', credentials);
-        
-        loginSection.classList.add('hidden');
-        sessionSection.classList.remove('hidden');
-        await loadSessions();
-      } catch (err) {
-        if (err.message.includes('Password change required')) {
-          loginSection.classList.add('hidden');
-          passwordChangeSection.classList.remove('hidden');
-        } else {
-          document.getElementById('loginStatus').textContent = 'Error: ' + err.message;
-          document.getElementById('loginStatus').style.background = '#f8d7da';
+        function logout() {
+            window.electronAPI.logout().then(() => {
+                isLoggedIn = false;
+                document.getElementById('main-app').classList.add('hidden');
+                document.getElementById('logout-btn').classList.add('hidden');
+                document.getElementById('login-panel').classList.remove('hidden');
+                document.getElementById('username').value = '';
+                document.getElementById('password').value = '';
+                showStatus('Logged out successfully', 'info');
+            });
         }
-      }
-    });
 
-    document.getElementById('changePasswordBtn').addEventListener('click', async () => {
-      const newPass = document.getElementById('newPassword').value;
-      const confirmPass = document.getElementById('confirmPassword').value;
-
-      if (newPass !== confirmPass) {
-        document.getElementById('passwordStatus').textContent = 'Passwords do not match';
-        document.getElementById('passwordStatus').style.background = '#f8d7da';
-        return;
-      }
-
-      try {
-        await saveCurrentConfig();
-        
-        const config = getConfig();
-        const credentials = {
-          ...config,
-          username: document.getElementById('username').value,
-          oldPassword: document.getElementById('password').value,
-          newPassword: newPass,
-        };
-
-        await ipcRenderer.invoke('change-password', credentials);
-        
-        passwordChangeSection.classList.add('hidden');
-        sessionSection.classList.remove('hidden');
-        await loadSessions();
-      } catch (err) {
-        document.getElementById('passwordStatus').textContent = 'Error: ' + err.message;
-        document.getElementById('passwordStatus').style.background = '#f8d7da';
-      }
-    });
-
-    document.getElementById('refreshSessionsBtn').addEventListener('click', loadSessions);
-
-    document.getElementById('newSessionBtn').addEventListener('click', () => {
-      sessionListView.classList.add('hidden');
-      newSessionView.classList.remove('hidden');
-    });
-
-    document.getElementById('cancelNewBtn').addEventListener('click', () => {
-      newSessionView.classList.add('hidden');
-      sessionListView.classList.remove('hidden');
-    });
-
-    document.getElementById('createSessionBtn').addEventListener('click', async () => {
-      try {
-        const sessionConfig = {
-          sessionName: document.getElementById('sessionName').value || undefined,
-          sourceLanguage: 'pt',
-          targetLanguages: ['en', 'fr', 'es', 'de', 'it'],
-          audioConfig: {
-            sampleRate: 16000,
-            encoding: 'pcm',
-            channels: 1,
-          },
-        };
-
-        const session = await ipcRenderer.invoke('start-session', sessionConfig);
-        currentSessionId = session.sessionId;
-        
-        newSessionView.classList.add('hidden');
-        activeSessionView.classList.remove('hidden');
-        
-        document.getElementById('sessionStatus').textContent = `Session: ${session.sessionName || session.sessionId}`;
-        document.getElementById('sessionStatus').style.background = '#d4edda';
-        
-        if (session.qrCode) {
-          document.getElementById('qrCode').innerHTML = `
-            <img src="${session.qrCode}" alt="QR Code">
-            <p>Scan to join: ${session.shortUrl}</p>
-          `;
+        function showConfig() {
+            const panel = document.getElementById('config-panel');
+            panel.classList.toggle('hidden');
+            
+            // Load audio devices when config panel is opened
+            if (!panel.classList.contains('hidden')) {
+                loadAudioDevices();
+            }
         }
-      } catch (err) {
-        alert('Error creating session: ' + err.message);
-      }
-    });
 
-    document.getElementById('endSessionBtn').addEventListener('click', async () => {
-      try {
-        await ipcRenderer.invoke('stop-session', currentSessionId);
-        currentSessionId = null;
-        
-        activeSessionView.classList.add('hidden');
-        sessionListView.classList.remove('hidden');
-        document.getElementById('qrCode').innerHTML = '';
-        
-        await loadSessions();
-      } catch (err) {
-        alert('Error ending session: ' + err.message);
-      }
-    });
+        async function loadAudioDevices() {
+            try {
+                const devices = await window.electronAPI.getAudioDevices();
+                const deviceSelect = document.getElementById('inputDevice');
+                const currentValue = deviceSelect.value;
+                
+                // Clear existing options
+                deviceSelect.innerHTML = '';
+                
+                // Add device options
+                devices.forEach(device => {
+                    const option = document.createElement('option');
+                    option.value = device.id;
+                    option.textContent = device.name;
+                    deviceSelect.appendChild(option);
+                });
+                
+                // Restore previous selection if it exists
+                if (currentValue && [...deviceSelect.options].some(opt => opt.value === currentValue)) {
+                    deviceSelect.value = currentValue;
+                }
+            } catch (error) {
+                console.error('Failed to load audio devices:', error);
+            }
+        }
 
-    document.getElementById('logoutBtn').addEventListener('click', async () => {
-      await ipcRenderer.invoke('disconnect');
-      sessionSection.classList.add('hidden');
-      loginSection.classList.remove('hidden');
-      document.getElementById('loginStatus').textContent = 'Please login';
-      document.getElementById('loginStatus').style.background = '#f0f0f0';
-      document.getElementById('password').value = '';
-      
-      sessionListView.classList.remove('hidden');
-      newSessionView.classList.add('hidden');
-      activeSessionView.classList.add('hidden');
-    });
-  </script>
+        function saveConfig() {
+            const config = {
+                // Connection settings
+                endpoint: document.getElementById('endpoint').value,
+                userPoolId: document.getElementById('userPoolId').value,
+                clientId: document.getElementById('clientId').value,
+                identityPoolId: document.getElementById('identityPoolId').value,
+                region: document.getElementById('region').value,
+                deviceId: 'macos-capture-local',
+                
+                // Audio settings
+                inputDevice: document.getElementById('inputDevice').value,
+                sampleRate: parseInt(document.getElementById('sampleRate').value),
+                encoding: document.getElementById('encoding').value,
+                channels: parseInt(document.getElementById('channels').value),
+                inputGain: parseInt(document.getElementById('inputGain').value)
+            };
+
+            window.electronAPI.saveConfig(config).then(() => {
+                showStatus('Configuration saved successfully', 'success');
+                document.getElementById('config-panel').classList.add('hidden');
+            });
+        }
+
+        async function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const config = await window.electronAPI.loadConfig();
+
+            if (!config || !config.userPoolId || !config.clientId) {
+                showStatus('Please configure the application first', 'error');
+                return;
+            }
+
+            const loginBtn = document.getElementById('login-btn');
+            loginBtn.disabled = true;
+            loginBtn.textContent = 'Logging in...';
+
+            try {
+                const credentials = {
+                    username,
+                    password,
+                    userPoolId: config.userPoolId,
+                    clientId: config.clientId,
+                    region: config.region,
+                    identityPoolId: config.identityPoolId
+                };
+
+                const result = await window.electronAPI.login(credentials);
+                
+                if (result.success) {
+                    isLoggedIn = true;
+                    document.getElementById('login-panel').classList.add('hidden');
+                    document.getElementById('main-app').classList.remove('hidden');
+                    document.getElementById('logout-btn').classList.remove('hidden');
+                    showStatus('Login successful! Ready for local streaming.', 'success');
+                }
+            } catch (error) {
+                showStatus(`Login failed: ${error.message}`, 'error');
+            } finally {
+                loginBtn.disabled = false;
+                loginBtn.textContent = 'Login';
+            }
+        }
+
+        async function startStreaming() {
+            if (!isLoggedIn) {
+                showStatus('Please login first', 'error');
+                return;
+            }
+
+            const startBtn = document.getElementById('start-btn');
+            const stopBtn = document.getElementById('stop-btn');
+
+            startBtn.disabled = true;
+            startBtn.textContent = '🎤 Starting...';
+
+            try {
+                await window.electronAPI.startLocalStreaming();
+                
+                isStreaming = true;
+                startBtn.classList.add('hidden');
+                stopBtn.classList.remove('hidden');
+                document.getElementById('vu-meter').classList.remove('hidden');
+                
+                showStatus('🎤 Local streaming active - Speak into your microphone', 'info');
+                
+                // Clear previous results
+                document.getElementById('transcription-content').textContent = 'Listening...';
+                document.getElementById('tab-en-US').textContent = 'Waiting for English translations...';
+                document.getElementById('tab-es-ES').textContent = 'Waiting for Spanish translations...';
+                document.getElementById('tab-fr-FR').textContent = 'Waiting for French translations...';
+                document.getElementById('tab-de-DE').textContent = 'Waiting for German translations...';
+                document.getElementById('tab-it-IT').textContent = 'Waiting for Italian translations...';
+                
+            } catch (error) {
+                showStatus(`Failed to start streaming: ${error.message}`, 'error');
+                startBtn.disabled = false;
+                startBtn.textContent = '🎤 Start Local Streaming';
+            }
+        }
+
+        async function stopStreaming() {
+            const startBtn = document.getElementById('start-btn');
+            const stopBtn = document.getElementById('stop-btn');
+
+            try {
+                await window.electronAPI.stopLocalStreaming();
+                
+                isStreaming = false;
+                stopBtn.classList.add('hidden');
+                startBtn.classList.remove('hidden');
+                startBtn.disabled = false;
+                startBtn.textContent = '🎤 Start Local Streaming';
+                document.getElementById('vu-meter').classList.add('hidden');
+                
+                showStatus('Streaming stopped', 'info');
+                
+            } catch (error) {
+                showStatus(`Failed to stop streaming: ${error.message}`, 'error');
+            }
+        }
+
+        function showStatus(message, type) {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = `status ${type}`;
+            status.classList.remove('hidden');
+            
+            setTimeout(() => {
+                status.classList.add('hidden');
+            }, 5000);
+        }
+
+        // Handle transcription results
+        window.electronAPI.onTranscription((result) => {
+            const content = document.getElementById('transcription-content');
+            if (result.isPartial) {
+                content.innerHTML = content.innerHTML.split('<br><em>')[0] + '<br><em>' + result.text + '</em>';
+            } else {
+                content.innerHTML = content.innerHTML.replace(/<br><em>.*<\/em>/, '') + '<br>' + result.text;
+            }
+            content.scrollTop = content.scrollHeight;
+        });
+
+        // Handle translation results
+        window.electronAPI.onTranslation((result) => {
+            result.translations.forEach(translation => {
+                const tabContent = document.getElementById(`tab-${translation.targetLanguage}`);
+                if (tabContent) {
+                    const translationItem = `<div style="margin-bottom: 15px; padding: 10px; background: rgba(255, 255, 255, 0.1); border-radius: 6px;">
+                        ${translation.text}
+                    </div>`;
+                    tabContent.innerHTML = translationItem + tabContent.innerHTML;
+                }
+            });
+        });
+
+        // Handle streaming errors
+        window.electronAPI.onStreamingError((error) => {
+            showStatus(`Streaming error: ${error.error}`, 'error');
+        });
+
+        // Handle audio level updates
+        window.electronAPI.onAudioLevel((level) => {
+            updateVUMeter(level);
+        });
+    </script>
 </body>
 </html>

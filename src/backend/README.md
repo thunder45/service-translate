@@ -1,15 +1,33 @@
-# Service Translate Backend - Production Ready
+# Service Translate Backend - Minimal Authentication Infrastructure
 
-AWS serverless infrastructure with real-time audio translation capabilities.
+**Simplified AWS infrastructure providing only authentication for local direct streaming.**
 
 ## Architecture
 
-- **API Gateway WebSocket API**: Real-time bidirectional communication
-- **Lambda Functions**: 9 event-driven handlers for each API route
-- **DynamoDB**: Connection, session, and terminology storage with TTL
-- **Cognito**: Admin authentication with JWT tokens
-- **AWS Transcribe Streaming**: Real-time Portuguese audio transcription
-- **AWS Translate**: Multi-language translation with custom terminology
+- **Cognito User Pool**: Admin user authentication with JWT tokens
+- **Cognito Identity Pool**: Direct AWS service access for authenticated users
+- **IAM Roles**: Least-privilege access to Transcribe and Translate services
+- **No Server Components**: No Lambda, API Gateway, or DynamoDB required
+
+## Prerequisites
+
+- Node.js 20+
+- AWS CLI configured with appropriate permissions
+- AWS CDK CLI: `npm install -g aws-cdk`
+
+## Setup
+
+```bash
+cd src/backend
+npm install
+```
+
+## What This Provides
+
+This minimal backend infrastructure enables:
+- **Admin Authentication**: Secure login for local application users
+- **Direct AWS Access**: Identity Pool provides temporary credentials for AWS services
+- **Cost Optimization**: No server infrastructure costs, only authentication services
 
 ## Prerequisites
 
@@ -30,7 +48,7 @@ npm install
 # Bootstrap CDK (first time only)
 cdk bootstrap
 
-# Deploy stack
+# Deploy minimal stack
 npm run deploy
 
 # View differences before deploy
@@ -41,69 +59,72 @@ npm run diff
 
 ### 1. Note the Outputs
 After deployment, save these values:
-- `WebSocketURL`: Use in client applications (convert https:// to wss://)
 - `UserPoolId`: For Cognito authentication
-- `UserPoolClientId`: For Cognito authentication
+- `UserPoolClientId`: For Cognito authentication  
+- `IdentityPoolId`: For direct AWS service access
+- `Region`: AWS region for services
 
 ### 2. Create Admin User
 ```bash
 ./create-admin.sh admin@example.com <UserPoolId>
 ```
 
-### 3. Test Connection
+### 3. Test Authentication
 ```bash
-./test-connection.sh
+./get-token.sh admin@example.com password <UserPoolId> <ClientId>
 ```
 
-## Lambda Handlers - All Implemented ✅
+## Current Implementation - Minimal Auth Only ✅
 
-### Connection Management
-- **connect.ts**: Establishes WebSocket connection with JWT authentication
-- **disconnect.ts**: Cleans up connection and pauses/removes from sessions
+### Authentication Infrastructure
+- **simplified-stack.ts**: Minimal CDK stack with Cognito User Pool and Identity Pool
+- **IAM Roles**: Permissions for authenticated users to access Transcribe and Translate
+- **No Lambda Functions**: Direct AWS SDK calls from local application
+- **No API Gateway**: No WebSocket or REST API infrastructure
+- **No DynamoDB**: No session or connection management needed
 
-### Session Management
-- **startsession.ts**: Creates new translation session with QR code (admin only)
-- **endsession.ts**: Terminates active session with statistics (admin only)
-- **joinsession.ts**: Joins or rejoins existing session (supports admin reconnection)
-- **leavesession.ts**: Removes client from session
-
-### Audio & Translation
-- **audiostream.ts**: **Real AWS Transcribe Streaming + AWS Translate integration**
-- **setlanguage.ts**: Changes client's preferred translation language
-
-### Terminology
-- **addterminology.ts**: Adds custom translation terms (admin only)
-
-## Real Audio Processing Pipeline
-
-The `audiostream.ts` handler implements a complete real-time translation pipeline:
-
-1. **Audio Buffering**: Collects chunks until ~64KB threshold
-2. **AWS Transcribe Streaming**: Real-time Portuguese transcription (not placeholder)
-3. **Custom Terminology**: Applies domain-specific term replacements
-4. **AWS Translate**: Translates to all target languages (EN, FR, ES, DE, IT)
-5. **WebSocket Broadcasting**: Sends translations to all connected clients
+### Admin Management Scripts
+- **create-admin.sh**: Creates admin users in Cognito User Pool
+- **change-password.sh**: Changes user passwords (first login)
+- **get-token.sh**: Retrieves JWT tokens for authentication
+- **test-connection.sh**: Validates authentication setup
 
 ## Key Implementation Details
 
-### Connection Parameters
-- Passed as query string parameters (not body)
-- Admin connections require JWT token in Authorization parameter
-- Format: `?connectionType=admin&deviceId=xyz&Authorization=Bearer%20token`
+### Authentication Flow
+1. **Admin Login**: Local app authenticates with Cognito User Pool
+2. **JWT Token**: Receives authentication token
+3. **Identity Pool**: Exchanges JWT for temporary AWS credentials
+4. **Direct Access**: Local app calls AWS Transcribe/Translate directly
 
-### Session Reconnection
-- Admin disconnect → session enters "paused" state
-- Admin rejoin via `joinsession` → session resumes to "active"
-- Clients can disconnect/reconnect without affecting session
+### Security Model
+- **Cognito User Pool**: Secure admin authentication
+- **Identity Pool**: Temporary AWS credentials (1 hour expiration)
+- **IAM Roles**: Least-privilege access to required AWS services
+- **Local Storage**: Encrypted credential storage in Electron app
 
-### Timestamps
-- All messages include ISO 8601 UTC timestamp
-- Format: `2024-01-01T12:00:00.123Z`
+### Cost Structure
+- **Cognito User Pool**: Free tier covers typical usage
+- **Cognito Identity Pool**: Free tier covers typical usage
+- **No Server Costs**: No Lambda, API Gateway, or DynamoDB charges
+- **Total Backend Cost**: ~$0/month for individual users
 
-### Error Handling
-- Standardized error responses with type, code, message, details
-- Proper HTTP status codes for WebSocket responses
-- Comprehensive logging for debugging
+## File Structure
+
+```
+src/backend/
+├── cdk/
+│   ├── simplified-stack.ts    # Minimal Cognito + IAM infrastructure
+│   ├── app.ts                # CDK app entry point
+│   └── cdk.json              # CDK configuration
+├── scripts/
+│   ├── create-admin.sh       # Admin user creation
+│   ├── change-password.sh    # Password management
+│   ├── get-token.sh         # Token retrieval for testing
+│   └── test-connection.sh   # Authentication validation
+├── package.json             # Dependencies and scripts
+└── README.md
+```
 
 ## Testing
 
@@ -122,41 +143,41 @@ The `audiostream.ts` handler implements a complete real-time translation pipelin
 ./get-token.sh admin@example.com password <UserPoolId> <ClientId>
 ```
 
-### Test WebSocket Connection
-```bash
-./test-connection.sh
-```
-
 ## Monitoring
 
-The infrastructure includes hooks for:
-- CloudWatch Logs (all Lambda functions)
-- CloudWatch Metrics (API Gateway, DynamoDB)
-- X-Ray Tracing (Lambda functions)
-- DynamoDB TTL for automatic cleanup
+Minimal monitoring includes:
+- CloudWatch Logs for Cognito authentication events
+- CloudWatch Metrics for Cognito usage
+- No Lambda or API Gateway monitoring needed
 
 ## Security
 
-- JWT token validation for admin connections
+- JWT token validation in local application
 - IAM roles with least-privilege access
-- VPC endpoints for private communication (optional)
-- Encryption at rest and in transit
+- Temporary AWS credentials (1-hour expiration)
+- Encrypted local credential storage
 
-## Cost Optimization
+## Migration from Server Architecture
 
-- Pay-per-use serverless architecture
-- DynamoDB on-demand billing
-- Lambda provisioned concurrency (optional)
-- API Gateway caching (optional)
+### Removed Components ✅
+- ❌ **API Gateway WebSocket**: No longer needed for local streaming
+- ❌ **Lambda Functions**: Direct AWS SDK calls instead
+- ❌ **DynamoDB Tables**: No session management needed
+- ❌ **Complex IAM Policies**: Simplified to Transcribe/Translate only
+
+### Retained Components ✅
+- ✅ **Cognito User Pool**: Admin authentication
+- ✅ **Cognito Identity Pool**: Direct AWS service access
+- ✅ **IAM Roles**: Permissions for AWS services
+- ✅ **Admin Scripts**: User management utilities
 
 ## Production Readiness
 
-This backend is **production-ready** with:
-- ✅ Real AWS service integrations (not placeholders)
-- ✅ Proper error handling and logging
-- ✅ Security best practices
-- ✅ Auto-scaling capabilities
-- ✅ Cost optimization
-- ✅ Monitoring hooks
+This minimal backend is **production-ready** for local applications with:
+- ✅ Secure authentication infrastructure
+- ✅ Direct AWS service access
+- ✅ Cost-optimized (no server costs)
+- ✅ Simple deployment and management
+- ✅ Scalable authentication (supports multiple users)
 
-The main missing component is the **web client application** for end users.
+Perfect for **local applications requiring authenticated AWS service access** without the complexity and cost of server infrastructure.

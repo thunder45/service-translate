@@ -1,7 +1,7 @@
 {
   "name": "service-translate-capture",
   "version": "2.0.0",
-  "description": "macOS Audio Capture for Service Translate",
+  "description": "Local Audio Translation - Direct AWS Streaming",
   "main": "dist/main.js",
   "scripts": {
     "start": "electron .",
@@ -10,12 +10,23 @@
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.0.0",
-    "ws": "^8.0.0"
+    "@aws-sdk/client-transcribe-streaming": "^3.901.0",
+    "@aws-sdk/client-translate": "^3.901.0",
+    "@aws-sdk/credential-providers": "^3.901.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "@types/ws": "^8.0.0",
     "electron": "^28.0.0",
     "typescript": "^5.0.0"
-  }
+  },
+  "keywords": [
+    "audio-translation",
+    "aws-transcribe",
+    "aws-translate",
+    "direct-streaming",
+    "local-processing",
+    "electron"
+  ],
+  "author": "Service Translate Team",
+  "license": "MIT"
 }

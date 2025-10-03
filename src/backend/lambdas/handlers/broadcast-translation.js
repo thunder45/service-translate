@@ -11,62 +11,56 @@ const WEBSOCKET_API_ENDPOINT = process.env.WEBSOCKET_API_ENDPOINT;
 const apigw = new client_apigatewaymanagementapi_1.ApiGatewayManagementApiClient({
     endpoint: WEBSOCKET_API_ENDPOINT.replace('wss://', 'https://'),
 });
-async function sendToConnection(connectionId, data) {
-    await apigw.send(new client_apigatewaymanagementapi_1.PostToConnectionCommand({
-        ConnectionId: connectionId,
-        Data: Buffer.from(JSON.stringify(data)),
-    }));
-}
 const handler = async (event) => {
     const connectionId = event.requestContext.connectionId;
     const timestamp = new Date().toISOString();
     try {
+        const body = JSON.parse(event.body || '{}');
+        const { sessionId, translatedTexts, isFinal, metadata } = body;
         // Verify admin connection
         const connResult = await ddb.send(new lib_dynamodb_1.GetCommand({
             TableName: CONNECTIONS_TABLE,
             Key: { connectionId },
         }));
         if (!connResult.Item || connResult.Item.connectionType !== 'admin') {
-            await sendToConnection(connectionId, {
-                type: 'error',
-                code: 403,
-                message: 'Admin connection required',
-                timestamp,
-            });
-            return { statusCode: 200 };
+            return { statusCode: 403 };
         }
-        // Get all sessions
-        const result = await ddb.send(new lib_dynamodb_1.ScanCommand({
+        // Get session participants
+        const sessionResult = await ddb.send(new lib_dynamodb_1.GetCommand({
             TableName: SESSIONS_TABLE,
+            Key: { sessionId },
         }));
-        const sessions = (result.Items || []).map(item => ({
-            sessionId: item.sessionId,
-            sessionName: item.sessionName,
-            status: item.status,
-            sourceLanguage: item.sourceLanguage,
-            targetLanguages: item.targetLanguages,
-            startedAt: item.startedAt,
-            endedAt: item.endedAt,
-            participantCount: item.participants?.length || 0,
-        }));
-        await sendToConnection(connectionId, {
-            type: 'sessions',
-            sessions,
+        if (!sessionResult.Item) {
+            return { statusCode: 404 };
+        }
+        const session = sessionResult.Item;
+        const participants = Array.isArray(session.participants)
+            ? session.participants
+            : Array.from(session.participants || []);
+        const translationMessage = {
+            type: 'translation',
+            sessionId,
+            translatedTexts,
+            isFinal,
             timestamp,
-        });
+            metadata,
+        };
+        // Broadcast to all participants
+        await Promise.all(participants.map(async (connId) => {
+            try {
+                await apigw.send(new client_apigatewaymanagementapi_1.PostToConnectionCommand({
+                    ConnectionId: connId,
+                    Data: Buffer.from(JSON.stringify(translationMessage)),
+                }));
+            }
+            catch (error) {
+                console.error(`Failed to send to ${connId}:`, error);
+            }
+        }));
         return { statusCode: 200 };
     }
     catch (error) {
         console.error('Error:', error);
-        try {
-            await sendToConnection(connectionId, {
-                type: 'error',
-                code: 500,
-                message: 'Internal server error',
-                timestamp,
-            });
-        }
-        catch { }
         return { statusCode: 500 };
     }
 };

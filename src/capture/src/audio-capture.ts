@@ -8,6 +8,7 @@ interface AudioConfig {
   sampleRate: number;
   encoding: string;
   channels: number;
+  device?: string;
 }
 
 export class AudioCapture extends EventEmitter {
@@ -26,15 +27,34 @@ export class AudioCapture extends EventEmitter {
     // Use sox to capture audio on macOS
     const { spawn } = require('child_process');
     
-    this.process = spawn('sox', [
-      '-d',                                    // Default audio device
-      '-t', 'raw',                            // Raw output
-      '-r', this.config.sampleRate.toString(), // Sample rate
-      '-e', 'signed-integer',                 // Encoding
-      '-b', '16',                             // Bit depth
-      '-c', this.config.channels.toString(),  // Channels
-      '-',                                    // Output to stdout
-    ]);
+    let soxArgs = [];
+    
+    if (this.config.device && this.config.device !== 'default') {
+      // Use specific CoreAudio device
+      soxArgs = [
+        '-t', 'coreaudio',                      // CoreAudio driver
+        this.config.device,                     // Device number
+        '-t', 'raw',                            // Raw output
+        '-r', this.config.sampleRate.toString(), // Sample rate
+        '-e', 'signed-integer',                 // Encoding
+        '-b', '16',                             // Bit depth
+        '-c', this.config.channels.toString(),  // Channels
+        '-',                                    // Output to stdout
+      ];
+    } else {
+      // Use default device
+      soxArgs = [
+        '-d',                                   // Default device
+        '-t', 'raw',                            // Raw output
+        '-r', this.config.sampleRate.toString(), // Sample rate
+        '-e', 'signed-integer',                 // Encoding
+        '-b', '16',                             // Bit depth
+        '-c', this.config.channels.toString(),  // Channels
+        '-',                                    // Output to stdout
+      ];
+    }
+    
+    this.process = spawn('sox', soxArgs);
 
     this.process.stdout.on('data', (chunk: Buffer) => {
       this.buffer.push(chunk);

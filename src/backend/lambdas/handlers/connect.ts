@@ -6,11 +6,12 @@ import { CognitoJwtVerifier } from 'aws-jwt-verify';
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const CONNECTIONS_TABLE = process.env.CONNECTIONS_TABLE!;
 const USER_POOL_ID = process.env.USER_POOL_ID!;
+const USER_POOL_CLIENT_ID = process.env.USER_POOL_CLIENT_ID!;
 
 const verifier = CognitoJwtVerifier.create({
   userPoolId: USER_POOL_ID,
   tokenUse: 'access',
-  clientId: null,
+  clientId: USER_POOL_CLIENT_ID, // Add client ID
 });
 
 export const handler: APIGatewayProxyWebsocketHandlerV2 = async (event) => {
@@ -73,6 +74,7 @@ export const handler: APIGatewayProxyWebsocketHandlerV2 = async (event) => {
       const payload = await verifier.verify(token);
       userId = payload.sub;
     } catch (error) {
+      console.error('JWT verification failed:', error);
       return {
         statusCode: 403,
         body: JSON.stringify({

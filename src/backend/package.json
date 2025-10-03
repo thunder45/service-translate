@@ -1,21 +1,19 @@
 {
   "name": "service-translate-backend",
   "version": "2.0.0",
-  "description": "Service Translate AWS Backend Infrastructure",
+  "description": "Simplified AWS Backend for Service Translate - Direct Streaming Architecture",
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",
     "cdk": "cdk",
     "deploy": "cdk deploy",
     "diff": "cdk diff",
-    "synth": "cdk synth"
+    "synth": "cdk synth",
+    "destroy": "cdk destroy --force"
   },
   "dependencies": {
     "@aws-sdk/client-apigatewaymanagementapi": "^3.0.0",
     "@aws-sdk/client-dynamodb": "^3.0.0",
-    "@aws-sdk/client-transcribe": "^3.0.0",
-    "@aws-sdk/client-transcribe-streaming": "^3.901.0",
-    "@aws-sdk/client-translate": "^3.0.0",
     "@aws-sdk/lib-dynamodb": "^3.0.0",
     "aws-cdk-lib": "^2.100.0",
     "aws-jwt-verify": "^4.0.0",
@@ -28,5 +26,16 @@
     "@types/qrcode": "^1.5.0",
     "aws-cdk": "^2.100.0",
     "typescript": "^5.0.0"
-  }
+  },
+  "keywords": [
+    "aws-cdk",
+    "serverless",
+    "websocket",
+    "cognito",
+    "direct-streaming",
+    "minimal-lambda",
+    "session-management"
+  ],
+  "author": "Service Translate Team",
+  "license": "MIT"
 }
