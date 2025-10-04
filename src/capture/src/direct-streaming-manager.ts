@@ -2,22 +2,26 @@ import { EventEmitter } from 'events';
 import { DirectTranscribeClient } from './direct-transcribe-client';
 import { TranslationService } from './translation-service';
 import { AudioCapture } from './audio-capture';
+import { HolyricsIntegration, HolyricsConfig } from './holyrics-integration';
 
 interface StreamingConfig {
   region: string;
   identityPoolId: string;
   userPoolId: string;
   jwtToken: string;
+  languageCode: string;
   sourceLanguage: string;
   targetLanguages: string[];
   sampleRate: number;
   audioDevice?: string;
+  holyrics?: HolyricsConfig;
 }
 
 export class DirectStreamingManager extends EventEmitter {
   private transcribeClient: DirectTranscribeClient;
   private translationService: TranslationService;
   private audioCapture: AudioCapture;
+  private holyricsIntegration?: HolyricsIntegration;
   private config: StreamingConfig;
   private isActive = false;
 
@@ -50,6 +54,11 @@ export class DirectStreamingManager extends EventEmitter {
       device: (global as any).config?.inputDevice,
     });
 
+    // Initialize Holyrics integration if configured
+    if (config.holyrics?.enabled) {
+      this.holyricsIntegration = new HolyricsIntegration(config.holyrics);
+    }
+
     this.setupEventHandlers();
   }
 
@@ -66,6 +75,28 @@ export class DirectStreamingManager extends EventEmitter {
       if (!result.isPartial && result.text.trim()) {
         try {
           const translations = await this.translationService.translateText(result.text);
+          
+          // Send to Holyrics if configured
+          if (this.holyricsIntegration && this.config.holyrics) {
+            const holyricsLanguage = this.config.holyrics.language;
+            console.log('[Holyrics] Configured language:', holyricsLanguage);
+            console.log('[Holyrics] Available translations:', translations.map(t => t.targetLanguage));
+            
+            // Match language with or without country code (fr matches fr-FR)
+            const translation = translations.find(t => 
+              t.targetLanguage === holyricsLanguage || 
+              t.targetLanguage.startsWith(holyricsLanguage + '-')
+            );
+            const holyricsText = translation?.text || result.text;
+            
+            console.log('[Holyrics] Selected translation:', translation ? `${translation.targetLanguage}: ${translation.text.substring(0, 50)}` : 'FALLBACK TO PT');
+            
+            try {
+              await this.holyricsIntegration.addTranslation(holyricsText);
+            } catch (error) {
+              console.error('Holyrics integration error:', error);
+            }
+          }
           
           this.emit('translation', {
             originalText: result.text,
@@ -139,6 +170,15 @@ export class DirectStreamingManager extends EventEmitter {
     try {
       console.log('Stopping local streaming...');
       
+      // Clear Holyrics display
+      if (this.holyricsIntegration) {
+        try {
+          await this.holyricsIntegration.clear();
+        } catch (error) {
+          console.error('Failed to clear Holyrics:', error);
+        }
+      }
+      
       // Stop audio capture first
       await this.audioCapture.stop();
       
@@ -163,14 +203,37 @@ export class DirectStreamingManager extends EventEmitter {
     if (!this.isActive) return;
     
     try {
-      console.log('Restarting transcription stream...');
-      await this.transcribeClient.stopStreaming();
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
-      await this.transcribeClient.startStreaming();
-      console.log('Transcription stream restarted successfully');
+      console.log('Transcription stream timed out - doing full restart...');
+      
+      // Do full stop/start like manual operation
+      await this.stopStreaming();
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await this.startStreaming();
+      
+      console.log('Streaming restarted successfully');
     } catch (error) {
-      console.error('Failed to restart transcription:', error);
+      console.error('Failed to restart streaming:', error);
       this.emit('error', { type: 'restart', error: (error as Error).message });
+    }
+  }
+
+  // Holyrics control methods
+  async clearHolyrics(): Promise<void> {
+    if (this.holyricsIntegration) {
+      await this.holyricsIntegration.clear();
+    }
+  }
+
+  async testHolyricsConnection(): Promise<boolean> {
+    if (this.holyricsIntegration) {
+      return await this.holyricsIntegration.testConnection();
+    }
+    return false;
+  }
+
+  updateHolyricsConfig(config: Partial<HolyricsConfig>): void {
+    if (this.holyricsIntegration) {
+      this.holyricsIntegration.updateConfig(config);
     }
   }
 }

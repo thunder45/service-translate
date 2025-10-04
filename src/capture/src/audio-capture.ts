@@ -24,34 +24,61 @@ export class AudioCapture extends EventEmitter {
   }
 
   async start(): Promise<void> {
-    // Use sox to capture audio on macOS
     const { spawn } = require('child_process');
+    const { platform } = require('os');
     
+    const isWindows = platform() === 'win32';
     let soxArgs = [];
     
-    if (this.config.device && this.config.device !== 'default') {
-      // Use specific CoreAudio device
-      soxArgs = [
-        '-t', 'coreaudio',                      // CoreAudio driver
-        this.config.device,                     // Device number
-        '-t', 'raw',                            // Raw output
-        '-r', this.config.sampleRate.toString(), // Sample rate
-        '-e', 'signed-integer',                 // Encoding
-        '-b', '16',                             // Bit depth
-        '-c', this.config.channels.toString(),  // Channels
-        '-',                                    // Output to stdout
-      ];
+    if (isWindows) {
+      // Windows: Use waveaudio driver
+      if (this.config.device && this.config.device !== 'default') {
+        soxArgs = [
+          '-t', 'waveaudio',
+          this.config.device,
+          '-t', 'raw',
+          '-r', this.config.sampleRate.toString(),
+          '-e', 'signed-integer',
+          '-b', '16',
+          '-c', this.config.channels.toString(),
+          '-'
+        ];
+      } else {
+        soxArgs = [
+          '-t', 'waveaudio',
+          '-d',
+          '-t', 'raw',
+          '-r', this.config.sampleRate.toString(),
+          '-e', 'signed-integer',
+          '-b', '16',
+          '-c', this.config.channels.toString(),
+          '-'
+        ];
+      }
     } else {
-      // Use default device
-      soxArgs = [
-        '-d',                                   // Default device
-        '-t', 'raw',                            // Raw output
-        '-r', this.config.sampleRate.toString(), // Sample rate
-        '-e', 'signed-integer',                 // Encoding
-        '-b', '16',                             // Bit depth
-        '-c', this.config.channels.toString(),  // Channels
-        '-',                                    // Output to stdout
-      ];
+      // macOS: Use CoreAudio driver
+      if (this.config.device && this.config.device !== 'default') {
+        soxArgs = [
+          '-t', 'coreaudio',
+          this.config.device,
+          '-t', 'raw',
+          '-r', this.config.sampleRate.toString(),
+          '-e', 'signed-integer',
+          '-b', '16',
+          '-c', this.config.channels.toString(),
+          '-'
+        ];
+      } else {
+        soxArgs = [
+          '-d',
+          '-t', 'raw',
+          '-r', this.config.sampleRate.toString(),
+          '-e', 'signed-integer',
+          '-b', '16',
+          '-c', this.config.channels.toString(),
+          '-'
+        ];
+      }
     }
     
     this.process = spawn('sox', soxArgs);

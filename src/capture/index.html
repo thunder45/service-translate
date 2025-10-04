@@ -291,6 +291,7 @@
             <div class="translation-tabs">
                 <button class="tab-button active" onclick="switchConfigTab('connection')">🔗 Connection</button>
                 <button class="tab-button" onclick="switchConfigTab('audio')">🎤 Audio</button>
+                <button class="tab-button" onclick="switchConfigTab('holyrics')">📺 Holyrics</button>
             </div>
             
             <div class="tab-content active" id="config-connection">
@@ -353,6 +354,47 @@
                         <label>Input Gain:</label>
                         <input type="range" id="inputGain" min="0" max="200" value="100" step="10">
                         <span id="gainValue">100%</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="tab-content" id="config-holyrics">
+                <div class="login-form">
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="holyricsEnabled"> Enable Holyrics Integration
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label>Holyrics Host:</label>
+                        <input type="text" id="holyricsHost" placeholder="192.168.1.100" value="localhost">
+                    </div>
+                    <div class="form-group">
+                        <label>Holyrics Port:</label>
+                        <input type="number" id="holyricsPort" placeholder="8080" value="8080">
+                    </div>
+                    <div class="form-group">
+                        <label>API Token:</label>
+                        <input type="text" id="holyricsToken" placeholder="your-api-token">
+                    </div>
+                    <div class="form-group">
+                        <label>Display Language:</label>
+                        <select id="holyricsLanguage">
+                            <option value="pt">Portuguese (Original)</option>
+                            <option value="en">English</option>
+                            <option value="es">Spanish</option>
+                            <option value="fr">French</option>
+                            <option value="de">German</option>
+                            <option value="it">Italian</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Max Lines on Screen:</label>
+                        <input type="number" id="holyricsMaxLines" min="1" max="10" value="3">
+                    </div>
+                    <div class="form-group">
+                        <button onclick="testHolyricsConnection()" style="margin-top: 10px;">🧪 Test Connection</button>
+                        <button onclick="clearHolyrics()" style="margin-top: 10px; margin-left: 10px;">🧹 Clear Screen</button>
                     </div>
                 </div>
             </div>
@@ -518,6 +560,9 @@
                 document.getElementById('channels').value = config.channels || '1';
                 document.getElementById('inputGain').value = config.inputGain || '100';
                 updateGainDisplay();
+                
+                // Holyrics tab
+                loadHolyricsConfig(config);
             }
         });
 
@@ -607,7 +652,15 @@
                 sampleRate: parseInt(document.getElementById('sampleRate').value),
                 encoding: document.getElementById('encoding').value,
                 channels: parseInt(document.getElementById('channels').value),
-                inputGain: parseInt(document.getElementById('inputGain').value)
+                inputGain: parseInt(document.getElementById('inputGain').value),
+                holyrics: {
+                    enabled: document.getElementById('holyricsEnabled').checked,
+                    host: document.getElementById('holyricsHost').value,
+                    port: parseInt(document.getElementById('holyricsPort').value),
+                    token: document.getElementById('holyricsToken').value,
+                    language: document.getElementById('holyricsLanguage').value,
+                    maxLines: parseInt(document.getElementById('holyricsMaxLines').value)
+                }
             };
 
             window.electronAPI.saveConfig(config).then(() => {
@@ -759,6 +812,41 @@
         window.electronAPI.onAudioLevel((level) => {
             updateVUMeter(level);
         });
+
+        // Holyrics control functions
+        async function testHolyricsConnection() {
+            try {
+                const result = await window.electronAPI.testHolyricsConnection();
+                if (result.success) {
+                    showStatus('Holyrics connection successful!', 'success');
+                } else {
+                    showStatus('Holyrics connection failed', 'error');
+                }
+            } catch (error) {
+                showStatus(`Holyrics test failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function clearHolyrics() {
+            try {
+                await window.electronAPI.clearHolyrics();
+                showStatus('Holyrics screen cleared', 'success');
+            } catch (error) {
+                showStatus(`Failed to clear Holyrics: ${error.message}`, 'error');
+            }
+        }
+
+        // Load Holyrics configuration
+        function loadHolyricsConfig(config) {
+            if (config.holyrics) {
+                document.getElementById('holyricsEnabled').checked = config.holyrics.enabled || false;
+                document.getElementById('holyricsHost').value = config.holyrics.host || 'localhost';
+                document.getElementById('holyricsPort').value = config.holyrics.port || 8080;
+                document.getElementById('holyricsToken').value = config.holyrics.token || '';
+                document.getElementById('holyricsLanguage').value = config.holyrics.language || 'pt';
+                document.getElementById('holyricsMaxLines').value = config.holyrics.maxLines || 3;
+            }
+        }
     </script>
 </body>
 </html>

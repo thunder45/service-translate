@@ -16,6 +16,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   startLocalStreaming: () => ipcRenderer.invoke('start-local-streaming'),
   stopLocalStreaming: () => ipcRenderer.invoke('stop-local-streaming'),
   
+  // Holyrics integration
+  clearHolyrics: () => ipcRenderer.invoke('clear-holyrics'),
+  testHolyricsConnection: () => ipcRenderer.invoke('test-holyrics-connection'),
+  
   // Event listeners
   onTranscription: (callback) => ipcRenderer.on('transcription', (_, data) => callback(data)),
   onTranslation: (callback) => ipcRenderer.on('translation', (_, data) => callback(data)),

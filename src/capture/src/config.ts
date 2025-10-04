@@ -17,6 +17,15 @@ export interface AppConfig {
   encoding?: string;
   channels?: number;
   inputGain?: number;
+  // Holyrics integration
+  holyrics?: {
+    enabled: boolean;
+    host: string;
+    port: number;
+    token: string;
+    language: string;
+    maxLines: number;
+  };
 }
 
 export function loadConfig(): AppConfig | null {
