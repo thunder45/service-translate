@@ -1,0 +1,13 @@
+{
+  "name": "Service Translate Client",
+  "short_name": "ST Client",
+  "description": "Real-time translation client with text-to-speech support",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2196F3",
+  "orientation": "portrait-primary",
+  "icons": [],
+  "categories": ["productivity", "utilities"],
+  "lang": "en-US"
+}

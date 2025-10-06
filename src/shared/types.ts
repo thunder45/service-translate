@@ -201,6 +201,73 @@ export interface ErrorResponse {
   timestamp: string;
 }
 
+// Local WebSocket Message Types (for local server communication)
+export interface LocalSessionConfig {
+  sessionId: string;
+  enabledLanguages: TargetLanguage[];
+  ttsMode: 'neural' | 'standard' | 'local' | 'disabled';
+  audioQuality: 'high' | 'medium' | 'low';
+}
+
+export interface LocalStartSessionMessage {
+  type: 'start-session';
+  sessionId: string;
+  config: LocalSessionConfig;
+}
+
+export interface LocalJoinSessionMessage {
+  type: 'join-session';
+  sessionId: string;
+  preferredLanguage: TargetLanguage;
+  audioCapabilities?: {
+    supportsPolly: boolean;
+    localTTSLanguages: TargetLanguage[];
+    audioFormats: string[];
+  };
+}
+
+export interface LocalLeaveSessionMessage {
+  type: 'leave-session';
+  sessionId: string;
+}
+
+export interface LocalLanguageChangeMessage {
+  type: 'change-language';
+  sessionId: string;
+  newLanguage: TargetLanguage;
+}
+
+export interface LocalConfigUpdateMessage {
+  type: 'config-update';
+  sessionId: string;
+  config: LocalSessionConfig;
+}
+
+export interface LocalTranslationBroadcast {
+  type: 'translation';
+  sessionId: string;
+  text: string;
+  language: TargetLanguage;
+  timestamp: number;
+  audioUrl?: string;
+  useLocalTTS?: boolean;
+}
+
+export interface LocalSessionMetadataMessage {
+  type: 'session-metadata';
+  config: LocalSessionConfig;
+  availableLanguages: TargetLanguage[];
+  ttsAvailable: boolean;
+  audioQuality: string;
+}
+
+export interface LocalErrorMessage {
+  type: 'error';
+  code: number;
+  message: string;
+  details?: any;
+}
+
 // Union types for all messages
 export type ClientRequest = 
   | StartSessionRequest
@@ -223,3 +290,20 @@ export type ServerResponse =
   | StatusMessage
   | AddTerminologyResponse
   | ErrorResponse;
+
+// Local WebSocket message unions
+export type LocalClientMessage = 
+  | LocalJoinSessionMessage
+  | LocalLeaveSessionMessage
+  | LocalLanguageChangeMessage;
+
+export type LocalAdminMessage = 
+  | LocalStartSessionMessage
+  | LocalConfigUpdateMessage
+  | LocalTranslationBroadcast;
+
+export type LocalServerMessage = 
+  | LocalSessionMetadataMessage
+  | LocalTranslationBroadcast
+  | LocalConfigUpdateMessage
+  | LocalErrorMessage;

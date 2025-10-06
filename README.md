@@ -1,47 +1,76 @@
-# Service Translate - Local Audio Translation
+# Service Translate - Real-Time Audio Translation with TTS
 
-**Standalone macOS application for real-time Portuguese-to-multilingual audio translation using direct AWS streaming.**
+**Multi-platform application for real-time Portuguese-to-multilingual audio translation with Text-to-Speech capabilities.**
 
 ## 🎯 What This Is
 
-A local audio translation application that:
-- Captures Portuguese audio from any macOS audio input device
-- **Streams directly to AWS Transcribe Streaming** (no server required)
-- **Translates directly via AWS Translate** (no server required)
-- **Displays results locally** in tabbed interface with 5 languages
-- **Real-time audio level monitoring** with VU meter visualization
-- **Secure credential storage** with 24-hour auto-expiration
-- Works completely offline after authentication
+A comprehensive real-time translation system that includes:
+- **Admin Application**: Electron app for audio capture and translation management
+- **WebSocket Server**: Local server for client communication and session management  
+- **Progressive Web App**: Client interface for congregation members with TTS playback
+- **Holyrics Integration**: Direct API integration for church presentation software
+- **Cross-Platform Support**: Works on Windows 10/11 and macOS 10.15+
+- **Hybrid TTS**: AWS Polly cloud voices with local Web Speech API fallback
 
-## 🏗️ Simplified Local Architecture
+## 🏗️ Local TTS Architecture
 
 ```
-┌─────────────────┐    Direct AWS SDK   ┌─────────────────┐
-│   macOS App     │ ──────────────────► │ AWS Transcribe  │
-│ (Audio Capture) │                     │   Streaming     │
-│                 │                     └─────────────────┘
-│                 │                              │
-│                 │    Direct AWS SDK    ┌───────▼─────────┐
-│                 │ ◄────────────────────│ AWS Translate   │
-│                 │                      │   (Direct)      │
-│ Local Display   │                      └─────────────────┘
-└─────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                    Admin Machine                        │
+│  ┌──────────────────┐    ┌──────────────────────────┐  │
+│  │  Electron App    │    │   Local WebSocket        │  │
+│  │  (Transcription) │◄──►│   Server (Node.js)       │  │
+│  │  + AWS Services  │    │   + Session Management   │  │
+│  └────────┬─────────┘    └──────────┬───────────────┘  │
+│           │ AWS Polly                │ Local Network    │
+│           ▼ (Cloud TTS)              ▼ (Church WiFi)   │
+│  ┌──────────────────┐    ┌──────────────────────────┐  │
+│  │   Audio Files    │    │   HTTP Server            │  │
+│  │  (Local Storage) │◄──►│   (Audio Serving)        │  │
+│  └──────────────────┘    └──────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+                                    │
+                    ┌───────────────┼───────────────┐
+                    │               │               │
+                    ▼               ▼               ▼
+            ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+            │ PWA Client 1 │ │ PWA Client 2 │ │ PWA Client N │
+            │ (Phone/Web)  │ │ (Tablet/Web) │ │ (Laptop/Web) │
+            │ Local TTS +  │ │ Local TTS +  │ │ Local TTS +  │
+            │ Cloud Audio  │ │ Cloud Audio  │ │ Cloud Audio  │
+            └──────────────┘ └──────────────┘ └──────────────┘
 ```
 
 ### 🚀 Key Benefits:
 
-- **100% Local Processing**: No server infrastructure needed
-- **Real-time Results**: Direct AWS SDK streaming
-- **Cost Effective**: Only pay for AWS Transcribe/Translate usage
-- **No Limits**: Stream for hours without timeout restrictions
-- **Offline Capable**: Works without internet after initial authentication
+- **Local Network Operation**: No cloud infrastructure costs beyond AWS services
+- **Hybrid TTS**: High-quality AWS Polly voices with local Web Speech API fallback
+- **Session-Based Access**: Simple session codes for client joining
+- **Real-time Broadcasting**: Instant text and audio delivery to all connected clients
+- **Cost Effective**: Under $3/hour for typical church service
 
 ## 🛠️ Technology Stack
 
-- **Audio Processing**: Direct AWS Transcribe Streaming + AWS Translate
-- **Client**: Electron, TypeScript, Direct AWS SDK
-- **Authentication**: Cognito Identity Pool for direct AWS service access
-- **UI**: Native HTML/CSS/JavaScript interface
+### Admin Application
+- **Platform**: Electron with TypeScript
+- **Audio Processing**: AWS Transcribe Streaming + AWS Translate
+- **TTS**: AWS Polly integration with cost tracking
+- **Authentication**: Cognito User Pool + Identity Pool
+- **Integrations**: Holyrics API, WebSocket client
+
+### WebSocket Server  
+- **Platform**: Node.js with TypeScript
+- **Framework**: Socket.IO for real-time communication
+- **Security**: Rate limiting, session validation, authentication middleware
+- **Audio**: Local file serving with HTTP endpoints
+- **Monitoring**: Comprehensive logging and health checks
+
+### Progressive Web App
+- **Platform**: Vanilla JavaScript PWA
+- **TTS**: Web Speech API with AWS Polly fallback
+- **UI**: Responsive design with accessibility features
+- **Offline**: Service Worker for offline capability
+- **Audio**: Advanced audio player with queue management
 
 ## 📁 Project Structure
 
@@ -49,27 +78,47 @@ A local audio translation application that:
 src/
 ├── backend/              # Minimal AWS infrastructure (auth only) ✅
 │   ├── cdk/             # CDK stack for Cognito setup
-│   └── lambdas/handlers/ # Minimal Lambda functions (if needed)
-├── capture/              # Local macOS Electron application ✅
+│   └── lambdas/handlers/ # WebSocket Lambda functions
+├── capture/              # Cross-platform Electron application ✅
 │   ├── src/             # TypeScript source
-│   │   ├── main.ts      # Electron main process
-│   │   ├── audio-capture.ts # Real audio capture via sox
-│   │   ├── auth.ts      # Cognito authentication
-│   │   ├── direct-transcribe-client.ts # Direct AWS Transcribe
-│   │   ├── translation-service.ts # Direct AWS Translate
-│   │   ├── direct-streaming-manager.ts # Local orchestration
-│   │   └── config.ts    # Configuration management
-│   ├── index.html       # Local UI interface
-│   ├── preload.js       # Electron IPC bridge
+│   │   ├── main.ts      # Electron main process with TTS integration
+│   │   ├── audio-capture.ts # Cross-platform audio capture
+│   │   ├── direct-streaming-manager.ts # Enhanced with TTS & WebSocket
+│   │   ├── tts-manager.ts # AWS Polly TTS integration
+│   │   ├── websocket-manager.ts # WebSocket client for server communication
+│   │   ├── cost-tracker.ts # Real-time cost monitoring
+│   │   ├── holyrics-integration.ts # Holyrics API integration
+│   │   └── monitoring-dashboard.ts # Performance monitoring
+│   ├── setup.sh        # macOS setup script
+│   ├── setup-windows.ps1 # Windows setup script
+│   └── package.json
+├── websocket-server/     # Local WebSocket server ✅
+│   ├── src/             # TypeScript source
+│   │   ├── server.ts    # Main server with Socket.IO
+│   │   ├── session-manager.ts # Session lifecycle management
+│   │   ├── audio-manager.ts # Audio file management and serving
+│   │   ├── tts-service.ts # AWS Polly integration
+│   │   ├── security-middleware.ts # Authentication and rate limiting
+│   │   └── analytics-manager.ts # Usage analytics and monitoring
+│   └── package.json
+├── client-pwa/           # Progressive Web Application ✅
+│   ├── app.js           # Main PWA application
+│   ├── sw.js            # Service Worker for offline support
+│   ├── performance-manager.js # Performance optimizations
+│   ├── user-analytics.js # Client-side analytics
+│   ├── manifest.json    # PWA manifest
 │   └── package.json
 ├── shared/               # Shared TypeScript types ✅
-│   └── types.ts         # API type definitions
-└── README.md
+│   └── types.ts         # Comprehensive type definitions
+└── config/               # Configuration management ✅
+    ├── aws-setup.ts     # AWS service configuration
+    ├── environment.ts   # Environment-specific settings
+    └── network-config.ts # Network and security configuration
 ```
 
 ## 🚀 Quick Start
 
-### 1. Deploy Authentication Infrastructure (One-time)
+### 1. Deploy AWS Infrastructure (One-time)
 ```bash
 cd src/backend
 npm install
@@ -80,23 +129,37 @@ npm run deploy
 ### 2. Create Admin User (One-time)
 ```bash
 ./create-admin.sh admin@example.com <UserPoolId>
+./first-login.sh admin@example.com <ClientId> <NewPassword>
 ```
 
-### 3. Run Local Application
+### 3. Setup Local Environment
 ```bash
-cd src/capture
-./setup.sh     # Installs sox and dependencies
-npm run dev    # Launches local Electron app
+# Install all dependencies
+npm run install:all
+
+# Run automated setup
+npm run setup
+
+# For development
+npm run setup:dev
 ```
 
-### 4. Configure and Start
-1. Click "⚙️ Configuration" to open tabbed settings
-2. **Connection Tab**: Enter AWS details and login credentials
-3. **Audio Tab**: Select your preferred audio input device
-4. Login with admin credentials (Enter key supported)
-5. Click "🎤 Start Local Streaming"
-6. Monitor audio levels with the VU meter
-7. Speak into your selected microphone and see real-time translations in language tabs
+### 4. Start All Services
+```bash
+# Start everything in local mode
+npm run start:local
+
+# Or start services individually
+npm run start:server    # WebSocket server
+npm run start:pwa       # PWA HTTP server  
+npm run start:capture   # Admin application
+```
+
+### 5. Configure and Use
+1. **Admin App**: Configure AWS credentials and audio settings
+2. **Create Session**: Start a session with a simple ID (e.g., "CHURCH-2025-001")
+3. **Client Access**: Share the client URL with congregation members
+4. **Start Translation**: Begin speaking and see real-time translations with TTS
 
 ## 🔧 Key Implementation Details
 
@@ -118,45 +181,69 @@ npm run dev    # Launches local Electron app
 - **Real-time Processing**: Audio processed as it's captured
 - **Local Results**: All translations displayed in the local interface
 
-## 📋 What's Working
+## 📋 What's Implemented
 
-### Local Application - Complete ✅
-- **audio-capture.ts**: Real macOS audio capture using sox
-- **direct-transcribe-client.ts**: Direct AWS Transcribe Streaming connection
-- **translation-service.ts**: Direct AWS Translate integration
-- **direct-streaming-manager.ts**: Local orchestration of the pipeline
-- **main.ts**: Complete Electron app with authentication, local display
+### Admin Application - Complete ✅
+- **Cross-platform support**: Windows 10/11 and macOS 10.15+
+- **Audio capture**: Real-time audio with device selection and VU meter
+- **AWS integration**: Transcribe, Translate, and Polly services
+- **TTS management**: Cost tracking and quality control
+- **WebSocket client**: Session management and broadcasting
+- **Holyrics integration**: Direct API integration for church displays
+- **Security**: Encrypted credential storage with auto-expiration
 
-### Authentication Infrastructure - Minimal ✅
-- **Cognito User Pool**: Admin authentication
-- **Cognito Identity Pool**: Direct AWS service access for authenticated users
-- **IAM Roles**: Permissions for Transcribe and Translate services
+### WebSocket Server - Complete ✅
+- **Session management**: Create, join, and manage translation sessions
+- **Real-time broadcasting**: Instant text and audio delivery
+- **Security middleware**: Authentication, rate limiting, and validation
+- **Audio serving**: Local HTTP server for Polly-generated audio files
+- **Analytics**: Comprehensive monitoring and performance tracking
+- **Error handling**: Robust error logging and recovery
+
+### Progressive Web App - Complete ✅
+- **Session joining**: Simple session ID-based access
+- **Multi-language support**: 5 target languages with selection
+- **Hybrid TTS**: Web Speech API with AWS Polly fallback
+- **Responsive design**: Works on phones, tablets, and desktops
+- **Offline support**: Service Worker for offline capability
+- **Accessibility**: Full keyboard navigation and screen reader support
+
+### AWS Infrastructure - Minimal ✅
+- **Cognito authentication**: User Pool and Identity Pool
+- **WebSocket API**: Session management and broadcasting
+- **Lambda functions**: Essential handlers for WebSocket operations
+- **IAM roles**: Least-privilege access for all services
 
 ## 🎯 Current Status
 
-### ✅ **COMPLETE - Local Application**
-- **Local Audio Processing**: Real-time capture and streaming
-- **Direct AWS Integration**: Transcribe + Translate without server
-- **Authentication**: Cognito JWT + Identity Pool for direct AWS access
-- **Local UI**: Real-time display of transcriptions and translations
+### ✅ **PRODUCTION READY**
+- **Complete TTS System**: Admin app, WebSocket server, and PWA client
+- **Cross-Platform**: Windows and macOS support with automated setup
+- **Real-Time Translation**: Portuguese to 5 languages with TTS playback
+- **Session Management**: Simple session-based access for clients
+- **Cost Optimization**: Real-time cost tracking with configurable limits
+- **Church Integration**: Direct Holyrics API integration
+- **Security**: Comprehensive authentication and rate limiting
 
 ### 🔧 **Configuration Required**
-- AWS Cognito User Pool and Identity Pool setup
-- Admin user creation for authentication
-- Local application configuration with AWS details
+- AWS infrastructure deployment (one-time)
+- Admin user creation and password setup
+- Local network configuration for client access
+- Optional Holyrics integration setup
 
 ## 💡 Architecture Benefits
 
-### Why Local Processing?
-- **No Server Costs**: Only pay for AWS Transcribe/Translate usage
-- **No Limits**: No timeout restrictions, stream indefinitely
-- **Lower Latency**: Direct connection to AWS services
-- **Simplicity**: Single application, no complex infrastructure
+### Why Local Network Architecture?
+- **Cost Effective**: No cloud infrastructure costs beyond AWS services
+- **High Performance**: Local network latency for client communication
+- **Scalable**: Supports 50+ concurrent clients per session
+- **Reliable**: Works without internet for clients after initial connection
 
-### Why Keep Minimal Backend?
-- **Authentication**: Cognito provides secure AWS access
-- **Direct Access**: Identity Pool enables direct AWS service calls
-- **Cost Effective**: Minimal infrastructure costs
+### Why Hybrid TTS?
+- **Quality Options**: High-quality AWS Polly voices when budget allows
+- **Fallback Support**: Local Web Speech API when offline or cost-conscious
+- **User Choice**: Clients can choose between cloud and local TTS
+- **Cost Control**: Real-time cost tracking with configurable limits
 
 ## 📞 Support
 
@@ -167,11 +254,20 @@ npm run dev    # Launches local Electron app
 
 ## 🔍 Cost Analysis
 
-### Local Architecture Costs:
-- **AWS Transcribe**: $0.024/minute of audio processing
-- **AWS Translate**: $15 per million characters translated
-- **Cognito**: Free tier covers typical usage
-- **No Server Costs**: No Lambda, API Gateway, or EC2 charges
-- **Total**: ~$0.024/minute + translation costs only
+### Typical Church Service (2 hours, 60 minutes speaking)
+- **AWS Transcribe**: $0.024/minute × 60 minutes = $1.44
+- **AWS Translate**: ~45,000 characters × 5 languages × $15/1M = $3.38
+- **AWS Polly (Standard)**: ~225,000 characters × $4/1M = $0.90
+- **AWS Polly (Neural)**: ~225,000 characters × $16/1M = $3.60
+- **WebSocket/Lambda**: Minimal usage, typically under $0.50
 
-This local architecture provides the most cost-effective solution for individual users who need real-time audio translation without the complexity of server infrastructure.
+### Total Cost Options:
+- **Local TTS Only**: $4.82 per service (no Polly costs)
+- **Standard Polly**: $5.72 per service (good quality)
+- **Neural Polly**: $9.32 per service (premium quality)
+
+### Cost Controls:
+- Real-time cost tracking in admin application
+- Configurable cost limits with automatic warnings
+- Language subset selection (reduce from 5 to 2-3 languages)
+- TTS mode switching (Neural → Standard → Local → Off)

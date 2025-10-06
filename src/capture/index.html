@@ -100,35 +100,62 @@
             gap: 30px;
         }
         
-        .vu-meter {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 10px;
+        .vu-meter-vertical {
+            width: 6px;
+            height: 120px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 3px;
+            overflow: hidden;
+            position: relative;
+            margin-right: 15px;
         }
         
-        .vu-meter-label {
+        .vu-fill-vertical {
+            width: 100%;
+            background: linear-gradient(to top, #4CAF50, #FFC107, #FF5722);
+            height: 0%;
+            transition: height 0.1s ease;
+            position: absolute;
+            bottom: 0;
+            border-radius: 3px;
+        }
+        
+        .translation-with-vu {
+            display: flex;
+            align-items: flex-start;
+            width: 100%;
+        }
+        
+        .translation-panel {
+            flex: 1;
+        }
+        
+        .session-input {
+            text-align: center;
+        }
+        
+        .session-input label {
+            display: block;
             font-size: 12px;
-            font-weight: 500;
             color: rgba(255, 255, 255, 0.8);
+            margin-bottom: 5px;
         }
         
-        .vu-meter-bars {
-            display: flex;
-            gap: 2px;
-            height: 60px;
-            align-items: flex-end;
+        .session-input input {
+            padding: 8px 12px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            font-size: 14px;
+            text-align: center;
+            width: 200px;
         }
         
-        .vu-bar {
-            width: 4px;
-            background: rgba(255, 255, 255, 0.2);
-            border-radius: 2px;
-            transition: all 0.1s ease;
-        }
-        
-        .vu-bar.active {
-            background: linear-gradient(to top, #4CAF50 0%, #FFC107 70%, #f44336 100%);
+        .session-input input:focus {
+            outline: none;
+            border-color: #2196F3;
+            background: rgba(255, 255, 255, 0.15);
         }
         
         .start-btn {
@@ -273,6 +300,28 @@
         .config-btn {
             right: 140px;
         }
+        
+        .cost-warning {
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+        
+        .language-checkbox {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 14px;
+        }
+        
+        .language-checkbox input[type="checkbox"] {
+            width: auto;
+            margin: 0;
+        }
     </style>
 </head>
 <body>
@@ -291,15 +340,12 @@
             <div class="translation-tabs">
                 <button class="tab-button active" onclick="switchConfigTab('connection')">🔗 Connection</button>
                 <button class="tab-button" onclick="switchConfigTab('audio')">🎤 Audio</button>
+                <button class="tab-button" onclick="switchConfigTab('tts')">🔊 TTS & Session</button>
                 <button class="tab-button" onclick="switchConfigTab('holyrics')">📺 Holyrics</button>
             </div>
             
             <div class="tab-content active" id="config-connection">
                 <div class="login-form">
-                    <div class="form-group">
-                        <label>WebSocket Endpoint:</label>
-                        <input type="text" id="endpoint" placeholder="wss://...">
-                    </div>
                     <div class="form-group">
                         <label>User Pool ID:</label>
                         <input type="text" id="userPoolId" placeholder="us-east-1_...">
@@ -354,6 +400,44 @@
                         <label>Input Gain:</label>
                         <input type="range" id="inputGain" min="0" max="200" value="100" step="10">
                         <span id="gainValue">100%</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="tab-content" id="config-tts">
+                <div class="login-form">
+                    <div class="form-group">
+                        <label>TTS Mode:</label>
+                        <select id="ttsMode">
+                            <option value="disabled">Disabled (Text Only)</option>
+                            <option value="local">Local Device TTS</option>
+                            <option value="standard">AWS Polly Standard ($4/1M chars)</option>
+                            <option value="neural" selected>AWS Polly Neural ($16/1M chars)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Enabled Languages:</label>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 5px;">
+                            <label style="display: flex; align-items: center; gap: 5px;">
+                                <input type="checkbox" id="lang-en-US" checked> 🇺🇸 English
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 5px;">
+                                <input type="checkbox" id="lang-es-ES" checked> 🇪🇸 Spanish
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 5px;">
+                                <input type="checkbox" id="lang-fr-FR" checked> 🇫🇷 French
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 5px;">
+                                <input type="checkbox" id="lang-de-DE" checked> 🇩🇪 German
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 5px;">
+                                <input type="checkbox" id="lang-it-IT" checked> 🇮🇹 Italian
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>WebSocket Server URL:</label>
+                        <input type="text" id="websocketUrl" placeholder="ws://localhost:3001" value="ws://localhost:3001">
                     </div>
                 </div>
             </div>
@@ -420,35 +504,129 @@
 
         <!-- Main Application -->
         <div id="main-app" class="hidden">
-            <div id="status" class="status hidden"></div>
+            <div id="status" class="status">Ready</div>
             
             <div class="streaming-controls">
-                <button class="start-btn" onclick="startStreaming()" id="start-btn">
-                    🎤 Start Local Streaming
-                </button>
-                <button class="stop-btn hidden" onclick="stopStreaming()" id="stop-btn">
-                    ⏹️ Stop Streaming
-                </button>
-                
-                <div class="vu-meter hidden" id="vu-meter">
-                    <div class="vu-meter-label">Audio Level</div>
-                    <div class="vu-meter-bars" id="vu-bars">
-                        <!-- VU bars will be generated by JavaScript -->
+                <div style="display: flex; align-items: center; justify-content: center; gap: 20px;">
+                    <div>
+                        <button class="start-btn" onclick="startStreaming()" id="start-btn">
+                            🎤 Start Local Streaming
+                        </button>
+                        <button class="stop-btn hidden" onclick="stopStreaming()" id="stop-btn" style="display: none;">
+                            ⏹️ Stop Streaming
+                        </button>
                     </div>
+                    
+                    <div class="session-input">
+                        <label for="session-id">Session ID:</label>
+                        <input type="text" id="session-id" placeholder="Enter session ID" value="CHURCH-2025-001">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cost Tracking and WebSocket Health Panels -->
+            <div style="display: flex; gap: 20px; margin-bottom: 20px;">
+                <!-- Cost Tracking Panel (2/3) -->
+                <div class="card" id="cost-panel" style="flex: 2;">
+                    <div style="display: flex; align-items: stretch;">
+                        <div class="vu-meter-vertical" id="vu-meter" style="margin-right: 15px;">
+                            <div class="vu-fill-vertical" id="vu-fill"></div>
+                        </div>
+                        
+                        <div style="flex: 1;">
+                            <div class="panel-header">💰 Cost Tracking</div>
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 15px;">
+                                <div style="text-align: center; flex: 1;">
+                                    <div style="font-size: 11px; color: rgba(255,255,255,0.7);">Transcribe</div>
+                                    <div id="transcribe-cost" style="font-weight: bold; font-size: 14px;">$0.00</div>
+                                    <div id="transcribe-usage" style="font-size: 10px; color: rgba(255,255,255,0.6);">0 min</div>
+                                </div>
+                                <div style="text-align: center; flex: 1;">
+                                    <div style="font-size: 11px; color: rgba(255,255,255,0.7);">Translate</div>
+                                    <div id="translate-cost" style="font-weight: bold; font-size: 14px;">$0.00</div>
+                                    <div id="translate-usage" style="font-size: 10px; color: rgba(255,255,255,0.6);">0 chars</div>
+                                </div>
+                                <div style="text-align: center; flex: 1;">
+                                    <div style="font-size: 11px; color: rgba(255,255,255,0.7);">Polly TTS</div>
+                                    <div id="polly-cost" style="font-weight: bold; font-size: 14px;">$0.00</div>
+                                    <div id="polly-usage" style="font-size: 10px; color: rgba(255,255,255,0.6);">0 chars</div>
+                                </div>
+                            </div>
+                            <div style="text-align: center; border-top: 1px solid rgba(255,255,255,0.2); padding-top: 15px;">
+                                <div style="font-size: 12px; color: rgba(255,255,255,0.8);">Total Cost</div>
+                                <div id="total-cost" style="font-size: 20px; font-weight: bold; color: #FFD700;">$0.00</div>
+                                <div id="hourly-rate" style="font-size: 10px; color: rgba(255,255,255,0.6);">$0.00/hour</div>
+                            </div>
+                            <div id="cost-warning" class="status error hidden" style="margin-top: 10px; margin-bottom: 0; font-size: 11px;">
+                                Cost rate exceeds $3/hour threshold!
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- WebSocket Health Panel (2/3) -->
+                <div class="card" id="websocket-panel" style="flex: 2;">
+                    <div class="panel-header">🌐 WebSocket Health</div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 15px;">
+                        <div style="text-align: center;">
+                            <div style="font-size: 12px; color: rgba(255,255,255,0.7);">Server Status</div>
+                            <div id="ws-server-status" style="font-weight: bold; color: #f44336;">Checking...</div>
+                            <div id="ws-server-url" style="font-size: 11px; color: rgba(255,255,255,0.6);">ws://localhost:3001</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="font-size: 12px; color: rgba(255,255,255,0.7);">Connected Clients</div>
+                            <div id="ws-client-count" style="font-weight: bold;">0</div>
+                            <div id="ws-last-activity" style="font-size: 11px; color: rgba(255,255,255,0.6);">No activity</div>
+                        </div>
+                    </div>
+                    <div style="text-align: center; border-top: 1px solid rgba(255,255,255,0.2); padding-top: 15px;">
+                        <div style="font-size: 14px; color: rgba(255,255,255,0.8);">Session Status</div>
+                        <div id="ws-session-id" style="font-size: 18px; font-weight: bold; color: #FFD700;">No Session</div>
+                        <div style="display: flex; gap: 10px; margin-top: 10px;">
+                            <button onclick="reconnectWebSocket()" style="flex: 1; font-size: 12px; padding: 8px;">🔄 Reconnect</button>
+                            <button onclick="stopWebSocketServer()" style="flex: 1; font-size: 12px; padding: 8px; background: #f44336;">🛑 Stop Server</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Session Management Panel -->
+            <div class="card hidden" id="session-panel">
+                <div class="panel-header">📡 Session Management</div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <div>
+                        <div style="font-size: 14px; color: rgba(255,255,255,0.8);">Session ID:</div>
+                        <div id="current-session-id" style="font-size: 18px; font-weight: bold;">Not Connected</div>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-size: 14px; color: rgba(255,255,255,0.8);">Connected Clients:</div>
+                        <div id="client-count" style="font-size: 18px; font-weight: bold;">0</div>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button onclick="createSession()" id="create-session-btn" style="flex: 1;">🚀 Create Session</button>
+                    <button onclick="endSession()" id="end-session-btn" style="flex: 1; background: #f44336;" class="hidden">🛑 End Session</button>
+                </div>
+                <div id="websocket-status" class="status info hidden" style="margin-top: 15px; margin-bottom: 0;">
+                    WebSocket: Disconnected
                 </div>
             </div>
 
             <div class="results-container">
                 <div class="card translation-panel">
-                    <div class="panel-header">🌍 Translations</div>
+                    <div class="panel-header">🌍 All Languages</div>
                     <div class="translation-tabs">
-                        <button class="tab-button active" onclick="switchTab('en-US')">🇺🇸 English</button>
+                        <button class="tab-button active" onclick="switchTab('pt-BR')">🇧🇷 Portuguese</button>
+                        <button class="tab-button" onclick="switchTab('en-US')">🇺🇸 English</button>
                         <button class="tab-button" onclick="switchTab('es-ES')">🇪🇸 Spanish</button>
                         <button class="tab-button" onclick="switchTab('fr-FR')">🇫🇷 French</button>
                         <button class="tab-button" onclick="switchTab('de-DE')">🇩🇪 German</button>
                         <button class="tab-button" onclick="switchTab('it-IT')">🇮🇹 Italian</button>
                     </div>
-                    <div class="tab-content active" id="tab-en-US">
+                    <div class="tab-content active" id="tab-pt-BR">
+                        Portuguese transcriptions will appear here...
+                    </div>
+                    <div class="tab-content" id="tab-en-US">
                         English translations will appear here...
                     </div>
                     <div class="tab-content" id="tab-es-ES">
@@ -464,13 +642,6 @@
                         Italian translations will appear here...
                     </div>
                 </div>
-
-                <div class="card transcription-panel">
-                    <div class="panel-header">🇵🇹 Portuguese (Original)</div>
-                    <div class="text-content" id="transcription-content">
-                        Waiting for audio...
-                    </div>
-                </div>
             </div>
         </div>
     </div>
@@ -478,38 +649,19 @@
     <script>
         let isLoggedIn = false;
         let isStreaming = false;
-        let activeTab = 'en-US';
+        let activeTab = 'pt-BR';
         let vuBars = [];
 
         function initializeVUMeter() {
-            const vuBarsContainer = document.getElementById('vu-bars');
-            vuBars = [];
-            
-            // Create 20 VU bars
-            for (let i = 0; i < 20; i++) {
-                const bar = document.createElement('div');
-                bar.className = 'vu-bar';
-                bar.style.height = '0%';
-                vuBarsContainer.appendChild(bar);
-                vuBars.push(bar);
-            }
+            // VU meter initialized (vertical bar)
         }
 
         function updateVUMeter(level) {
-            if (!vuBars.length) return;
+            const vuFill = document.getElementById('vu-fill');
+            if (!vuFill) return;
             
-            // Convert level (0-100) to number of active bars
-            const activeBars = Math.floor((level / 100) * vuBars.length);
-            
-            vuBars.forEach((bar, index) => {
-                if (index < activeBars) {
-                    bar.classList.add('active');
-                    bar.style.height = '100%';
-                } else {
-                    bar.classList.remove('active');
-                    bar.style.height = '10%';
-                }
-            });
+            // Set height based on level (0-100) for vertical meter
+            vuFill.style.height = Math.min(100, Math.max(0, level)) + '%';
         }
 
         // Initialize VU meter on page load
@@ -547,7 +699,6 @@
         window.electronAPI.loadConfig().then(config => {
             if (config) {
                 // Connection tab
-                document.getElementById('endpoint').value = config.endpoint || '';
                 document.getElementById('userPoolId').value = config.userPoolId || '';
                 document.getElementById('clientId').value = config.clientId || '';
                 document.getElementById('identityPoolId').value = config.identityPoolId || '';
@@ -563,6 +714,9 @@
                 
                 // Holyrics tab
                 loadHolyricsConfig(config);
+                
+                // TTS tab
+                loadTTSConfig(config);
             }
         });
 
@@ -585,9 +739,148 @@
                 document.getElementById('login-panel').classList.add('hidden');
                 document.getElementById('main-app').classList.remove('hidden');
                 document.getElementById('logout-btn').classList.remove('hidden');
-                showStatus('Welcome back! Ready for local streaming.', 'success');
+                showStatus('Welcome back! Checking WebSocket server...', 'success');
+                
+                // Auto-check and start WebSocket server
+                checkAndStartWebSocketServer();
             }
         });
+
+        async function checkAndStartWebSocketServer() {
+            try {
+                // First check if server is already running
+                const isRunning = await checkWebSocketServerStatus();
+                
+                if (isRunning) {
+                    updateWebSocketStatus('connected');
+                    updateLastActivity('Server already running');
+                    showStatus('WebSocket server is already running', 'success');
+                    
+                    // Try to connect
+                    setTimeout(() => {
+                        connectToWebSocketServer();
+                    }, 1000);
+                } else {
+                    // Start the server
+                    showStatus('Starting WebSocket server...', 'info');
+                    updateLastActivity('Starting server...');
+                    
+                    const result = await window.electronAPI.startWebSocketServer();
+                    
+                    if (result.success) {
+                        updateWebSocketStatus('connected');
+                        updateLastActivity('Server started successfully');
+                        showStatus('WebSocket server started successfully', 'success');
+                        
+                        // Connect after server starts
+                        setTimeout(() => {
+                            connectToWebSocketServer();
+                        }, 2000);
+                    } else {
+                        updateWebSocketStatus('disconnected');
+                        updateLastActivity('Server start failed');
+                        showStatus(`Failed to start server: ${result.message}`, 'error');
+                    }
+                }
+            } catch (error) {
+                console.error('Error checking/starting WebSocket server:', error);
+                updateWebSocketStatus('disconnected');
+                updateLastActivity('Server check failed');
+                showStatus(`Server check failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function checkWebSocketServerStatus() {
+            try {
+                const url = document.getElementById('websocketUrl')?.value || 'ws://localhost:3001';
+                
+                return new Promise((resolve) => {
+                    const ws = new WebSocket(url);
+                    
+                    ws.onopen = () => {
+                        ws.close();
+                        resolve(true);
+                    };
+                    
+                    ws.onerror = () => {
+                        resolve(false);
+                    };
+                    
+                    // Timeout after 3 seconds
+                    setTimeout(() => {
+                        if (ws.readyState === WebSocket.CONNECTING) {
+                            ws.close();
+                        }
+                        resolve(false);
+                    }, 3000);
+                });
+            } catch (error) {
+                return false;
+            }
+        }
+
+        async function connectToWebSocketServer() {
+            try {
+                const url = document.getElementById('websocketUrl')?.value || 'ws://localhost:3001';
+                const sessionId = document.getElementById('session-id')?.value;
+                
+                if (sessionId) {
+                    // Create session if we have a session ID
+                    updateSessionId(sessionId);
+                    updateLastActivity('Session created');
+                }
+                
+                updateWebSocketStatus('connected');
+                updateLastActivity('Connected to server');
+                
+            } catch (error) {
+                console.error('Failed to connect to WebSocket server:', error);
+                updateWebSocketStatus('disconnected');
+                updateLastActivity('Connection failed');
+            }
+        }
+
+        async function reconnectWebSocket() {
+            showStatus('Reconnecting to WebSocket server...', 'info');
+            updateLastActivity('Reconnection requested');
+            
+            try {
+                const isRunning = await checkWebSocketServerStatus();
+                
+                if (isRunning) {
+                    connectToWebSocketServer();
+                    showStatus('Reconnected to WebSocket server', 'success');
+                } else {
+                    // Server is not running, try to start it
+                    await checkAndStartWebSocketServer();
+                }
+            } catch (error) {
+                console.error('Failed to reconnect:', error);
+                showStatus(`Reconnection failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function stopWebSocketServer() {
+            showStatus('Stopping WebSocket server...', 'info');
+            updateLastActivity('Server stop requested');
+            
+            try {
+                // This would call a new IPC handler to stop the server
+                const result = await window.electronAPI.stopWebSocketServer();
+                
+                if (result.success) {
+                    updateWebSocketStatus('disconnected');
+                    updateSessionId('');
+                    updateLastActivity('Server stopped');
+                    showStatus('WebSocket server stopped', 'success');
+                } else {
+                    showStatus(`Failed to stop server: ${result.message}`, 'error');
+                }
+            } catch (error) {
+                console.error('Failed to stop server:', error);
+                showStatus(`Failed to stop server: ${error.message}`, 'error');
+            }
+        }
 
         function logout() {
             window.electronAPI.logout().then(() => {
@@ -640,7 +933,6 @@
         function saveConfig() {
             const config = {
                 // Connection settings
-                endpoint: document.getElementById('endpoint').value,
                 userPoolId: document.getElementById('userPoolId').value,
                 clientId: document.getElementById('clientId').value,
                 identityPoolId: document.getElementById('identityPoolId').value,
@@ -660,6 +952,12 @@
                     token: document.getElementById('holyricsToken').value,
                     language: document.getElementById('holyricsLanguage').value,
                     maxLines: parseInt(document.getElementById('holyricsMaxLines').value)
+                },
+                tts: {
+                    mode: document.getElementById('ttsMode').value,
+                    enabledLanguages: getEnabledLanguages(),
+                    websocketUrl: document.getElementById('websocketUrl').value,
+                    sessionId: document.getElementById('session-id').value
                 }
             };
 
@@ -700,7 +998,10 @@
                     document.getElementById('login-panel').classList.add('hidden');
                     document.getElementById('main-app').classList.remove('hidden');
                     document.getElementById('logout-btn').classList.remove('hidden');
-                    showStatus('Login successful! Ready for local streaming.', 'success');
+                    showStatus('Login successful! Checking WebSocket server...', 'success');
+                    
+                    // Auto-check and start WebSocket server
+                    checkAndStartWebSocketServer();
                 }
             } catch (error) {
                 showStatus(`Login failed: ${error.message}`, 'error');
@@ -733,7 +1034,7 @@
                 showStatus('🎤 Local streaming active - Speak into your microphone', 'info');
                 
                 // Clear previous results
-                document.getElementById('transcription-content').textContent = 'Listening...';
+                document.getElementById('tab-pt-BR').textContent = 'Listening...';
                 document.getElementById('tab-en-US').textContent = 'Waiting for English translations...';
                 document.getElementById('tab-es-ES').textContent = 'Waiting for Spanish translations...';
                 document.getElementById('tab-fr-FR').textContent = 'Waiting for French translations...';
@@ -779,13 +1080,160 @@
             }, 5000);
         }
 
+        // TTS Configuration Functions
+        function loadTTSConfig(config) {
+            if (config && config.tts) {
+                document.getElementById('ttsMode').value = config.tts.mode || 'neural';
+                document.getElementById('websocketUrl').value = config.tts.websocketUrl || 'ws://localhost:3001';
+                document.getElementById('session-id').value = config.tts.sessionId || '';
+                
+                // Load enabled languages
+                const enabledLanguages = config.tts.enabledLanguages || ['en-US', 'es-ES', 'fr-FR', 'de-DE', 'it-IT'];
+                ['en-US', 'es-ES', 'fr-FR', 'de-DE', 'it-IT'].forEach(lang => {
+                    document.getElementById(`lang-${lang}`).checked = enabledLanguages.includes(lang);
+                });
+            }
+        }
+        
+        function getEnabledLanguages() {
+            const languages = [];
+            ['en-US', 'es-ES', 'fr-FR', 'de-DE', 'it-IT'].forEach(lang => {
+                if (document.getElementById(`lang-${lang}`).checked) {
+                    languages.push(lang);
+                }
+            });
+            return languages;
+        }
+        
+        function generateSessionId() {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            const hour = String(now.getHours()).padStart(2, '0');
+            const minute = String(now.getMinutes()).padStart(2, '0');
+            
+            const sessionId = `CHURCH-${year}${month}${day}-${hour}${minute}`;
+            document.getElementById('sessionId').value = sessionId;
+            showStatus(`Generated session ID: ${sessionId}`, 'success');
+        }
+        
+        function createSession() {
+            const sessionId = document.getElementById('sessionId').value;
+            if (!sessionId) {
+                showStatus('Please enter a session ID first', 'error');
+                return;
+            }
+            
+            document.getElementById('current-session-id').textContent = sessionId;
+            document.getElementById('create-session-btn').classList.add('hidden');
+            document.getElementById('end-session-btn').classList.remove('hidden');
+            document.getElementById('session-panel').classList.remove('hidden');
+            document.getElementById('websocket-status').classList.remove('hidden');
+            document.getElementById('websocket-status').textContent = 'WebSocket: Connected';
+            document.getElementById('websocket-status').className = 'status success';
+            
+            showStatus(`Session ${sessionId} created successfully`, 'success');
+        }
+        
+        function endSession() {
+            document.getElementById('current-session-id').textContent = 'Not Connected';
+            document.getElementById('client-count').textContent = '0';
+            document.getElementById('create-session-btn').classList.remove('hidden');
+            document.getElementById('end-session-btn').classList.add('hidden');
+            document.getElementById('websocket-status').textContent = 'WebSocket: Disconnected';
+            document.getElementById('websocket-status').className = 'status info';
+            
+            showStatus('Session ended', 'info');
+        }
+        
+        // Cost tracking functions
+        let costTracker = {
+            transcribe: { cost: 0, minutes: 0 },
+            translate: { cost: 0, characters: 0 },
+            polly: { cost: 0, characters: 0 },
+            total: 0,
+            hourlyRate: 0,
+            sessionStart: new Date()
+        };
+        
+        function updateCostDisplay() {
+            document.getElementById('transcribe-cost').textContent = `$${costTracker.transcribe.cost.toFixed(3)}`;
+            document.getElementById('transcribe-usage').textContent = `${costTracker.transcribe.minutes.toFixed(1)} min`;
+            
+            document.getElementById('translate-cost').textContent = `$${costTracker.translate.cost.toFixed(3)}`;
+            document.getElementById('translate-usage').textContent = `${costTracker.translate.characters} chars`;
+            
+            document.getElementById('polly-cost').textContent = `$${costTracker.polly.cost.toFixed(3)}`;
+            document.getElementById('polly-usage').textContent = `${costTracker.polly.characters} chars`;
+            
+            document.getElementById('total-cost').textContent = `$${costTracker.total.toFixed(3)}`;
+            document.getElementById('hourly-rate').textContent = `$${costTracker.hourlyRate.toFixed(2)}/hour`;
+            
+            // Show warning if hourly rate exceeds $3
+            const warningElement = document.getElementById('cost-warning');
+            if (costTracker.hourlyRate > 3.0) {
+                warningElement.classList.remove('hidden');
+                warningElement.textContent = `Cost rate of $${costTracker.hourlyRate.toFixed(2)}/hour exceeds $3/hour threshold!`;
+            } else {
+                warningElement.classList.add('hidden');
+            }
+        }
+        
+        function trackTranscribeUsage(minutes) {
+            costTracker.transcribe.minutes += minutes;
+            costTracker.transcribe.cost += minutes * 0.024; // $0.024 per minute
+            updateTotalCost();
+        }
+        
+        function trackTranslateUsage(characters) {
+            costTracker.translate.characters += characters;
+            costTracker.translate.cost += characters * (15 / 1000000); // $15 per 1M characters
+            updateTotalCost();
+        }
+        
+        function trackPollyUsage(characters, voiceType) {
+            costTracker.polly.characters += characters;
+            const rate = voiceType === 'neural' ? (16 / 1000000) : (4 / 1000000);
+            costTracker.polly.cost += characters * rate;
+            updateTotalCost();
+        }
+        
+        function updateTotalCost() {
+            costTracker.total = costTracker.transcribe.cost + costTracker.translate.cost + costTracker.polly.cost;
+            
+            // Calculate hourly rate
+            const sessionHours = (new Date() - costTracker.sessionStart) / (1000 * 60 * 60);
+            costTracker.hourlyRate = sessionHours > 0 ? costTracker.total / sessionHours : 0;
+            
+            updateCostDisplay();
+        }
+        
+        function resetCostTracking() {
+            costTracker = {
+                transcribe: { cost: 0, minutes: 0 },
+                translate: { cost: 0, characters: 0 },
+                polly: { cost: 0, characters: 0 },
+                total: 0,
+                hourlyRate: 0,
+                sessionStart: new Date()
+            };
+            updateCostDisplay();
+        }
+
         // Handle transcription results
         window.electronAPI.onTranscription((result) => {
-            const content = document.getElementById('transcription-content');
+            const content = document.getElementById('tab-pt-BR');
             if (result.isPartial) {
                 content.innerHTML = content.innerHTML.split('<br><em>')[0] + '<br><em>' + result.text + '</em>';
             } else {
                 content.innerHTML = content.innerHTML.replace(/<br><em>.*<\/em>/, '') + '<br>' + result.text;
+                
+                // Track transcription usage for cost calculation
+                if (result.text && result.text.trim()) {
+                    const estimatedMinutes = result.text.split(' ').length / 150; // ~150 words per minute
+                    trackTranscribeUsage(estimatedMinutes);
+                }
             }
             content.scrollTop = content.scrollHeight;
         });
@@ -795,12 +1243,20 @@
             result.translations.forEach(translation => {
                 const tabContent = document.getElementById(`tab-${translation.targetLanguage}`);
                 if (tabContent) {
-                    const translationItem = `<div style="margin-bottom: 15px; padding: 10px; background: rgba(255, 255, 255, 0.1); border-radius: 6px;">
-                        ${translation.text}
-                    </div>`;
-                    tabContent.innerHTML = translationItem + tabContent.innerHTML;
+                    if (translation.isPartial) {
+                        tabContent.innerHTML = tabContent.innerHTML.split('<br><em>')[0] + '<br><em>' + translation.text + '</em>';
+                    } else {
+                        tabContent.innerHTML = tabContent.innerHTML.replace(/<br><em>.*<\/em>/, '') + '<br>' + translation.text;
+                    }
+                    tabContent.scrollTop = tabContent.scrollHeight;
                 }
             });
+            
+            // Track translation usage for cost calculation
+            if (result.originalText && result.translations) {
+                const totalCharacters = result.originalText.length * result.translations.length;
+                trackTranslateUsage(totalCharacters);
+            }
         });
 
         // Handle streaming errors
@@ -811,6 +1267,42 @@
         // Handle audio level updates
         window.electronAPI.onAudioLevel((level) => {
             updateVUMeter(level);
+        });
+
+        // Handle cost tracking events
+        window.electronAPI.onPollyUsage((usage) => {
+            console.log('Polly usage event received:', usage);
+            trackPollyUsage(usage.characters, usage.voiceType);
+        });
+
+        window.electronAPI.onCostsUpdated((costs) => {
+            console.log('Costs updated event received:', costs);
+            costTracker = { ...costTracker, ...costs };
+            updateCostDisplay();
+        });
+
+        window.electronAPI.onCostAlert((alert) => {
+            console.log('Cost alert event received:', alert);
+            showStatus(`Cost Alert: ${alert.message}`, 'error');
+        });
+
+        // Handle WebSocket events
+        window.electronAPI.onWebSocketConnected(() => {
+            updateWebSocketStatus('connected');
+        });
+
+        window.electronAPI.onWebSocketDisconnected(() => {
+            updateWebSocketStatus('disconnected');
+        });
+
+        window.electronAPI.onClientConnected((clientInfo) => {
+            updateClientCount();
+            updateLastActivity('Client connected');
+        });
+
+        window.electronAPI.onClientDisconnected((clientInfo) => {
+            updateClientCount();
+            updateLastActivity('Client disconnected');
         });
 
         // Holyrics control functions
@@ -846,6 +1338,34 @@
                 document.getElementById('holyricsLanguage').value = config.holyrics.language || 'pt';
                 document.getElementById('holyricsMaxLines').value = config.holyrics.maxLines || 3;
             }
+        }
+
+        // WebSocket Health Functions
+        function updateWebSocketStatus(status) {
+            const statusElement = document.getElementById('ws-server-status');
+            if (status === 'connected') {
+                statusElement.textContent = 'Connected';
+                statusElement.style.color = '#4CAF50';
+            } else {
+                statusElement.textContent = 'Disconnected';
+                statusElement.style.color = '#f44336';
+            }
+        }
+
+        function updateClientCount() {
+            // This would be updated from actual WebSocket events
+            const count = document.getElementById('ws-client-count').textContent;
+            // For now, just update the display
+        }
+
+        function updateLastActivity(activity) {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString();
+            document.getElementById('ws-last-activity').textContent = `${activity} at ${timeStr}`;
+        }
+
+        function updateSessionId(sessionId) {
+            document.getElementById('ws-session-id').textContent = sessionId || 'No Session';
         }
     </script>
 </body>

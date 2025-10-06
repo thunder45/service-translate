@@ -245,7 +245,71 @@ ipcMain.handle('change-password', async (_, credentials) => {
   return { success: true, token };
 });
 
-// Local streaming (no WebSocket)
+// TTS and WebSocket handlers
+ipcMain.handle('connect-websocket', async () => {
+  if (streamingManager) {
+    try {
+      await streamingManager.connectWebSocket();
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+  return { success: false, error: 'Streaming manager not initialized' };
+});
+
+ipcMain.handle('create-session', async (_, sessionId) => {
+  if (streamingManager) {
+    try {
+      await streamingManager.createSession(sessionId);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+  return { success: false, error: 'Streaming manager not initialized' };
+});
+
+ipcMain.handle('end-session', async () => {
+  if (streamingManager) {
+    try {
+      await streamingManager.endSession();
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+  return { success: false, error: 'Streaming manager not initialized' };
+});
+
+ipcMain.handle('update-tts-config', async (_, config) => {
+  if (streamingManager) {
+    try {
+      streamingManager.updateTTSConfig(config);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+  return { success: false, error: 'Streaming manager not initialized' };
+});
+
+ipcMain.handle('get-current-costs', async () => {
+  if (streamingManager) {
+    return streamingManager.getCurrentCosts();
+  }
+  return null;
+});
+
+ipcMain.handle('reset-cost-tracking', async () => {
+  if (streamingManager) {
+    streamingManager.resetCostTracking();
+    return { success: true };
+  }
+  return { success: false, error: 'Streaming manager not initialized' };
+});
+
+// Local streaming (enhanced with TTS and WebSocket)
 ipcMain.handle('start-local-streaming', async (_, options = {}) => {
   const config = (global as any).config;
   const token = (global as any).authToken;
@@ -265,6 +329,11 @@ ipcMain.handle('start-local-streaming', async (_, options = {}) => {
     sampleRate: config.sampleRate || 16000,
     audioDevice: options.audioDevice || 'default',
     holyrics: config.holyrics,
+    tts: config.tts || {
+      mode: 'neural',
+      enabledLanguages: ['en-US', 'es-ES', 'fr-FR', 'de-DE', 'it-IT'],
+      websocketUrl: 'ws://localhost:3001'
+    },
   });
 
   // Setup event handlers for local display
@@ -284,6 +353,35 @@ ipcMain.handle('start-local-streaming', async (_, options = {}) => {
     mainWindow?.webContents.send('audio-level', level);
   });
 
+  // TTS and WebSocket event handlers
+  streamingManager.on('polly-usage', (usage) => {
+    mainWindow?.webContents.send('polly-usage', usage);
+  });
+
+  streamingManager.on('costs-updated', (costs) => {
+    mainWindow?.webContents.send('costs-updated', costs);
+  });
+
+  streamingManager.on('cost-alert', (alert) => {
+    mainWindow?.webContents.send('cost-alert', alert);
+  });
+
+  streamingManager.on('websocket-connected', () => {
+    mainWindow?.webContents.send('websocket-connected');
+  });
+
+  streamingManager.on('websocket-disconnected', () => {
+    mainWindow?.webContents.send('websocket-disconnected');
+  });
+
+  streamingManager.on('client-connected', (clientInfo) => {
+    mainWindow?.webContents.send('client-connected', clientInfo);
+  });
+
+  streamingManager.on('client-disconnected', (clientInfo) => {
+    mainWindow?.webContents.send('client-disconnected', clientInfo);
+  });
+
   await streamingManager.startStreaming();
   return { success: true };
 });
@@ -294,6 +392,75 @@ ipcMain.handle('stop-local-streaming', async () => {
     streamingManager = null;
   }
   return { success: true };
+});
+
+ipcMain.handle('start-websocket-server', async () => {
+  try {
+    const { exec } = require('child_process');
+    const path = require('path');
+    
+    // Get the websocket server path
+    const serverPath = path.join(__dirname, '../../websocket-server');
+    
+    return new Promise((resolve, reject) => {
+      // Start the WebSocket server
+      const serverProcess = exec('npm start', { 
+        cwd: serverPath,
+        detached: true
+      });
+      
+      let hasResolved = false;
+      
+      serverProcess.stdout.on('data', (data) => {
+        console.log('WebSocket Server:', data);
+        if ((data.includes('listening on port') || data.includes('Server running')) && !hasResolved) {
+          hasResolved = true;
+          resolve({ success: true, message: 'Server started successfully' });
+        }
+      });
+      
+      serverProcess.stderr.on('data', (data) => {
+        console.error('WebSocket Server Error:', data);
+        if (data.includes('EADDRINUSE') && !hasResolved) {
+          hasResolved = true;
+          resolve({ success: true, message: 'Server already running on port 3001' });
+        } else if (!hasResolved) {
+          hasResolved = true;
+          reject(new Error(data.toString()));
+        }
+      });
+      
+      // Timeout after 10 seconds
+      setTimeout(() => {
+        if (!hasResolved) {
+          hasResolved = true;
+          resolve({ success: false, message: 'Server start timeout - check manually' });
+        }
+      }, 10000);
+    });
+  } catch (error) {
+    return { success: false, message: (error as Error).message };
+  }
+});
+
+ipcMain.handle('stop-websocket-server', async () => {
+  try {
+    const { exec } = require('child_process');
+    
+    return new Promise((resolve) => {
+      // Kill any process running on port 3001
+      exec('lsof -ti:3001 | xargs kill -9', (error, stdout, stderr) => {
+        if (error) {
+          // Process might not be running, which is fine
+          resolve({ success: true, message: 'Server stopped (was not running)' });
+        } else {
+          resolve({ success: true, message: 'Server stopped successfully' });
+        }
+      });
+    });
+  } catch (error) {
+    return { success: false, message: (error as Error).message };
+  }
 });
 
 // Token storage helpers

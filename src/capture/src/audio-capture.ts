@@ -28,7 +28,7 @@ export class AudioCapture extends EventEmitter {
     const { platform } = require('os');
     
     const isWindows = platform() === 'win32';
-    let soxArgs = [];
+    let soxArgs: string[] = [];
     
     if (isWindows) {
       // Windows: Use waveaudio driver
@@ -120,8 +120,8 @@ export class AudioCapture extends EventEmitter {
       sum += sample * sample;
     }
     const rms = Math.sqrt(sum / (buffer.length / 2));
-    // Normalize to 0-100
-    return Math.min(100, (rms / 32768) * 100);
+    // Normalize to 0-100 with increased sensitivity
+    return Math.min(100, (rms / 32768) * 100 * 20);
   }
 
   stop(): void {

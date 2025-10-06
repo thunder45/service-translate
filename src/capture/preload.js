@@ -20,9 +20,28 @@ contextBridge.exposeInMainWorld('electronAPI', {
   clearHolyrics: () => ipcRenderer.invoke('clear-holyrics'),
   testHolyricsConnection: () => ipcRenderer.invoke('test-holyrics-connection'),
   
+  // TTS and WebSocket
+  connectWebSocket: () => ipcRenderer.invoke('connect-websocket'),
+  createSession: (sessionId) => ipcRenderer.invoke('create-session', sessionId),
+  endSession: () => ipcRenderer.invoke('end-session'),
+  updateTTSConfig: (config) => ipcRenderer.invoke('update-tts-config', config),
+  getCurrentCosts: () => ipcRenderer.invoke('get-current-costs'),
+  resetCostTracking: () => ipcRenderer.invoke('reset-cost-tracking'),
+  startWebSocketServer: () => ipcRenderer.invoke('start-websocket-server'),
+  stopWebSocketServer: () => ipcRenderer.invoke('stop-websocket-server'),
+  
   // Event listeners
   onTranscription: (callback) => ipcRenderer.on('transcription', (_, data) => callback(data)),
   onTranslation: (callback) => ipcRenderer.on('translation', (_, data) => callback(data)),
   onStreamingError: (callback) => ipcRenderer.on('streaming-error', (_, data) => callback(data)),
   onAudioLevel: (callback) => ipcRenderer.on('audio-level', (_, data) => callback(data)),
+  
+  // TTS and WebSocket events
+  onPollyUsage: (callback) => ipcRenderer.on('polly-usage', (_, data) => callback(data)),
+  onCostsUpdated: (callback) => ipcRenderer.on('costs-updated', (_, data) => callback(data)),
+  onCostAlert: (callback) => ipcRenderer.on('cost-alert', (_, data) => callback(data)),
+  onWebSocketConnected: (callback) => ipcRenderer.on('websocket-connected', () => callback()),
+  onWebSocketDisconnected: (callback) => ipcRenderer.on('websocket-disconnected', () => callback()),
+  onClientConnected: (callback) => ipcRenderer.on('client-connected', (_, data) => callback(data)),
+  onClientDisconnected: (callback) => ipcRenderer.on('client-disconnected', (_, data) => callback(data)),
 });

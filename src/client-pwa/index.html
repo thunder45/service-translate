@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#2196F3">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="ST Client">
+    
+    <title>Service Translate Client</title>
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="manifest.json">
+    
+    <!-- Styles -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- App Container -->
+    <div id="app" class="app-container">
+        
+        <!-- Header -->
+        <header class="app-header">
+            <h1 class="app-title">Service Translate</h1>
+            <button id="fullscreen-btn" class="icon-btn" title="Toggle Fullscreen">
+                <span class="icon">⛶</span>
+            </button>
+        </header>
+
+        <!-- Main Content -->
+        <main class="app-main">
+            
+            <!-- Session Join Screen -->
+            <div id="join-screen" class="screen active">
+                <div class="join-container">
+                    <div class="logo-container">
+                        <div class="app-logo">🌐</div>
+                        <h2>Join Translation Session</h2>
+                    </div>
+                    
+                    <form id="join-form" class="join-form">
+                        <div class="input-group">
+                            <label for="session-id">Session ID</label>
+                            <input 
+                                type="text" 
+                                id="session-id" 
+                                placeholder="e.g., CHURCH-2025-001"
+                                autocomplete="off"
+                                required
+                            >
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary">
+                            Join Session
+                        </button>
+                    </form>
+                    
+                    <div id="join-status" class="status-message"></div>
+                </div>
+            </div>
+
+            <!-- Translation Screen -->
+            <div id="translation-screen" class="screen">
+                
+                <!-- Session Info -->
+                <div class="session-info">
+                    <div class="session-id-display">
+                        <span class="label">Session:</span>
+                        <span id="current-session-id">-</span>
+                    </div>
+                    <div class="connection-status">
+                        <span id="connection-indicator" class="status-dot offline"></span>
+                        <span id="connection-text">Connecting...</span>
+                    </div>
+                </div>
+
+                <!-- Language Selection -->
+                <div class="language-section">
+                    <label for="language-select">Language:</label>
+                    <select id="language-select" class="language-select">
+                        <option value="">Select Language...</option>
+                    </select>
+                </div>
+
+                <!-- Audio Controls -->
+                <div class="audio-controls">
+                    <button id="mute-btn" class="audio-btn" title="Mute/Unmute">
+                        <span class="icon">🔊</span>
+                    </button>
+                    <div class="volume-control">
+                        <input 
+                            type="range" 
+                            id="volume-slider" 
+                            min="0" 
+                            max="100" 
+                            value="80"
+                            class="volume-slider"
+                        >
+                        <span id="volume-display" class="volume-display">80%</span>
+                    </div>
+                </div>
+
+                <!-- Translation Display -->
+                <div id="translation-display" class="translation-display">
+                    <div class="welcome-message">
+                        <p>Welcome! Select your language and wait for translations to begin.</p>
+                    </div>
+                </div>
+
+                <!-- Settings Panel -->
+                <div id="settings-panel" class="settings-panel">
+                    <h3>Display Settings</h3>
+                    
+                    <div class="setting-group">
+                        <label for="font-size">Font Size:</label>
+                        <select id="font-size" class="setting-select">
+                            <option value="small">Small</option>
+                            <option value="medium" selected>Medium</option>
+                            <option value="large">Large</option>
+                            <option value="extra-large">Extra Large</option>
+                        </select>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="font-family">Font Family:</label>
+                        <select id="font-family" class="setting-select">
+                            <option value="sans-serif" selected>Sans Serif</option>
+                            <option value="serif">Serif</option>
+                            <option value="monospace">Monospace</option>
+                        </select>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="bg-color">Background:</label>
+                        <select id="bg-color" class="setting-select">
+                            <option value="white" selected>White</option>
+                            <option value="light-gray">Light Gray</option>
+                            <option value="dark-gray">Dark Gray</option>
+                            <option value="black">Black</option>
+                        </select>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="text-color">Text Color:</label>
+                        <select id="text-color" class="setting-select">
+                            <option value="black" selected>Black</option>
+                            <option value="white">White</option>
+                            <option value="blue">Blue</option>
+                            <option value="green">Green</option>
+                        </select>
+                    </div>
+                </div>
+
+            </div>
+
+        </main>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <button id="settings-btn" class="footer-btn">
+                <span class="icon">⚙️</span>
+                <span class="label">Settings</span>
+            </button>
+            
+            <button id="leave-btn" class="footer-btn" style="display: none;">
+                <span class="icon">🚪</span>
+                <span class="label">Leave</span>
+            </button>
+        </footer>
+
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">Connecting...</div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="performance-manager.js"></script>
+    <script src="lazy-loader.js"></script>
+    <script src="user-analytics.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

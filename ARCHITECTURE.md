@@ -1,38 +1,55 @@
-# Service Translate - Local Direct Streaming Architecture
+# Service Translate - Local TTS Architecture
 
 ## 🏗️ Architecture Overview
 
-Service Translate uses a **local direct streaming architecture** that processes audio entirely on the local machine, streaming directly to AWS services for optimal cost and performance.
+Service Translate uses a **local network TTS architecture** that combines real-time audio translation with Text-to-Speech capabilities, serving multiple clients through a local WebSocket server while maintaining cost efficiency.
 
 ```
-┌─────────────────┐    Direct AWS SDK   ┌─────────────────┐
-│   macOS App     │ ──────────────────► │ AWS Transcribe  │
-│ (Audio Capture) │                     │   Streaming     │
-│                 │                     └─────────────────┘
-│                 │                              │
-│                 │    Direct AWS SDK    ┌───────▼─────────┐
-│                 │ ◄────────────────────│ AWS Translate   │
-│                 │                      │   (Direct)      │
-│ Local Display   │                      └─────────────────┘
-└─────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                    Admin Machine                        │
+│  ┌──────────────────┐    ┌──────────────────────────┐  │
+│  │  Electron App    │    │   Local WebSocket        │  │
+│  │  (Transcription) │◄──►│   Server (Node.js)       │  │
+│  │  + AWS Services  │    │   + Session Management   │  │
+│  └────────┬─────────┘    └──────────┬───────────────┘  │
+│           │ AWS Polly                │ Local Network    │
+│           ▼ (Cloud TTS)              ▼ (Church WiFi)   │
+│  ┌──────────────────┐    ┌──────────────────────────┐  │
+│  │   Audio Files    │    │   HTTP Server            │  │
+│  │  (Local Storage) │◄──►│   (Audio Serving)        │  │
+│  └──────────────────┘    └──────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+                                    │
+                    ┌───────────────┼───────────────┐
+                    │               │               │
+                    ▼               ▼               ▼
+            ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+            │ PWA Client 1 │ │ PWA Client 2 │ │ PWA Client N │
+            │ (Phone/Web)  │ │ (Tablet/Web) │ │ (Laptop/Web) │
+            │ Local TTS +  │ │ Local TTS +  │ │ Local TTS +  │
+            │ Cloud Audio  │ │ Cloud Audio  │ │ Cloud Audio  │
+            └──────────────┘ └──────────────┘ └──────────────┘
 ```
 
 ## 🎯 Design Principles
 
-### 1. **Direct AWS Service Access**
-- **No server infrastructure**: Audio streams directly to AWS Transcribe
-- **No API Gateway**: Eliminates request/response overhead
-- **SDK-managed streaming**: AWS handles chunking, buffering, and reconnection
+### 1. **Local Network Operation**
+- **Church WiFi deployment**: All components run on local network
+- **No cloud infrastructure**: Only AWS services for transcription/translation/TTS
+- **Session-based access**: Simple session codes for client joining
+- **Real-time broadcasting**: WebSocket server handles client communication
 
-### 2. **Local Processing**
-- **Real-time display**: Translations shown immediately in local UI
-- **Secure storage**: Credentials encrypted using Electron safeStorage
-- **Device selection**: Comprehensive audio input device enumeration
+### 2. **Hybrid TTS Strategy**
+- **Quality options**: AWS Polly Neural/Standard voices for premium experience
+- **Fallback support**: Web Speech API for cost-conscious or offline operation
+- **User choice**: Clients can select between cloud and local TTS
+- **Cost control**: Real-time tracking with configurable limits
 
-### 3. **Cost Optimization**
-- **Pay-per-use**: Only pay for actual audio processing time
-- **No server costs**: No Lambda, API Gateway, or EC2 charges
-- **Efficient scaling**: AWS services auto-scale without infrastructure
+### 3. **Cross-Platform Support**
+- **Windows and macOS**: Admin application works on both platforms
+- **Universal clients**: PWA works on any device with a browser
+- **Automated setup**: Platform-specific installation scripts
+- **Consistent experience**: Same features across all platforms
 
 ## 🔧 Component Architecture
 

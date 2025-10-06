@@ -3,6 +3,16 @@ import { DirectTranscribeClient } from './direct-transcribe-client';
 import { TranslationService } from './translation-service';
 import { AudioCapture } from './audio-capture';
 import { HolyricsIntegration, HolyricsConfig } from './holyrics-integration';
+import { TTSManager, TTSMode, TargetLanguage } from './tts-manager';
+import { WebSocketManager, SessionConfig } from './websocket-manager';
+import { CostTracker } from './cost-tracker';
+
+interface TTSConfig {
+  mode: TTSMode;
+  enabledLanguages: TargetLanguage[];
+  websocketUrl?: string;
+  sessionId?: string;
+}
 
 interface StreamingConfig {
   region: string;
@@ -15,6 +25,7 @@ interface StreamingConfig {
   sampleRate: number;
   audioDevice?: string;
   holyrics?: HolyricsConfig;
+  tts?: TTSConfig;
 }
 
 export class DirectStreamingManager extends EventEmitter {
@@ -22,8 +33,12 @@ export class DirectStreamingManager extends EventEmitter {
   private translationService: TranslationService;
   private audioCapture: AudioCapture;
   private holyricsIntegration?: HolyricsIntegration;
+  private ttsManager?: TTSManager;
+  private webSocketManager?: WebSocketManager;
+  private costTracker: CostTracker;
   private config: StreamingConfig;
   private isActive = false;
+  private audioCache: Map<string, string> = new Map(); // Cache for generated audio URLs
 
   constructor(config: StreamingConfig) {
     super();
@@ -59,12 +74,43 @@ export class DirectStreamingManager extends EventEmitter {
       this.holyricsIntegration = new HolyricsIntegration(config.holyrics);
     }
 
+    // Initialize TTS Manager if configured
+    if (config.tts && config.tts.mode !== 'disabled') {
+      this.ttsManager = new TTSManager({
+        region: config.region,
+        identityPoolId: config.identityPoolId,
+        userPoolId: config.userPoolId,
+        jwtToken: config.jwtToken,
+        mode: config.tts.mode,
+        enabledLanguages: config.tts.enabledLanguages
+      });
+    }
+
+    // Initialize WebSocket Manager if configured
+    if (config.tts?.websocketUrl) {
+      this.webSocketManager = new WebSocketManager({
+        serverUrl: config.tts.websocketUrl,
+        reconnectAttempts: 5,
+        reconnectDelay: 1000
+      });
+    }
+
+    // Initialize Cost Tracker
+    this.costTracker = new CostTracker();
+
     this.setupEventHandlers();
   }
 
   private setupEventHandlers(): void {
     // Handle transcription results
     this.transcribeClient.on('transcription', async (result) => {
+      // Track transcription usage for cost calculation
+      if (!result.isPartial) {
+        // Estimate transcription time (rough approximation)
+        const estimatedMinutes = result.text.split(' ').length / 150; // ~150 words per minute
+        this.costTracker.trackTranscribeUsage(estimatedMinutes);
+      }
+
       this.emit('transcription', {
         text: result.text,
         isPartial: result.isPartial,
@@ -75,6 +121,16 @@ export class DirectStreamingManager extends EventEmitter {
       if (!result.isPartial && result.text.trim()) {
         try {
           const translations = await this.translationService.translateText(result.text);
+          
+          // Track translation usage for cost calculation
+          const totalCharacters = result.text.length * translations.length;
+          this.costTracker.trackTranslateUsage(totalCharacters);
+          
+          // Generate TTS audio if enabled
+          const audioUrls = new Map<TargetLanguage, string>();
+          if (this.ttsManager && this.config.tts?.mode !== 'disabled' && this.config.tts?.mode !== 'local') {
+            await this.generateTTSAudio(translations, audioUrls);
+          }
           
           // Send to Holyrics if configured
           if (this.holyricsIntegration && this.config.holyrics) {
@@ -98,9 +154,15 @@ export class DirectStreamingManager extends EventEmitter {
             }
           }
           
+          // Broadcast to WebSocket clients if connected
+          if (this.webSocketManager && this.webSocketManager.isConnectedToServer()) {
+            this.webSocketManager.broadcastTranslation(result.text, translations, audioUrls);
+          }
+          
           this.emit('translation', {
             originalText: result.text,
             translations: translations,
+            audioUrls: audioUrls,
             timestamp: new Date().toISOString(),
           });
         } catch (error) {
@@ -138,6 +200,54 @@ export class DirectStreamingManager extends EventEmitter {
     this.audioCapture.on('error', (error) => {
       console.error('Audio capture error:', error);
       this.emit('error', { type: 'audio', error: error.message });
+    });
+
+    // Handle TTS events
+    if (this.ttsManager) {
+      this.ttsManager.on('polly-usage', (usage) => {
+        this.costTracker.trackPollyUsage(usage.characters, usage.voiceType);
+        this.emit('polly-usage', usage);
+      });
+
+      this.ttsManager.on('error', (error) => {
+        console.error('TTS error:', error);
+        this.emit('error', { type: 'tts', error: error.error });
+      });
+    }
+
+    // Handle WebSocket events
+    if (this.webSocketManager) {
+      this.webSocketManager.on('connected', () => {
+        console.log('WebSocket connected');
+        this.emit('websocket-connected');
+      });
+
+      this.webSocketManager.on('disconnected', () => {
+        console.log('WebSocket disconnected');
+        this.emit('websocket-disconnected');
+      });
+
+      this.webSocketManager.on('error', (error) => {
+        console.error('WebSocket error:', error);
+        this.emit('error', { type: 'websocket', error: error.message });
+      });
+
+      this.webSocketManager.on('client-connected', (clientInfo) => {
+        this.emit('client-connected', clientInfo);
+      });
+
+      this.webSocketManager.on('client-disconnected', (clientInfo) => {
+        this.emit('client-disconnected', clientInfo);
+      });
+    }
+
+    // Handle cost tracking events
+    this.costTracker.on('cost-alert', (alert) => {
+      this.emit('cost-alert', alert);
+    });
+
+    this.costTracker.on('costs-updated', (costs) => {
+      this.emit('costs-updated', costs);
     });
   }
 
@@ -235,5 +345,183 @@ export class DirectStreamingManager extends EventEmitter {
     if (this.holyricsIntegration) {
       this.holyricsIntegration.updateConfig(config);
     }
+  }
+
+  // TTS Management Methods
+
+  /**
+   * Generate TTS audio for translations
+   */
+  private async generateTTSAudio(translations: Array<{targetLanguage: string; text: string}>, audioUrls: Map<TargetLanguage, string>): Promise<void> {
+    if (!this.ttsManager) return;
+
+    const promises = translations.map(async (translation) => {
+      const language = translation.targetLanguage as TargetLanguage;
+      
+      // Check if language is supported and enabled
+      if (!this.ttsManager!.isLanguageSupported(language)) {
+        return;
+      }
+
+      // Check cache first
+      const cacheKey = `${language}-${this.hashText(translation.text)}`;
+      if (this.audioCache.has(cacheKey)) {
+        audioUrls.set(language, this.audioCache.get(cacheKey)!);
+        return;
+      }
+
+      try {
+        const audioResult = await this.ttsManager!.generateAudio(translation.text, language);
+        if (audioResult) {
+          audioUrls.set(language, audioResult.audioUrl);
+          this.audioCache.set(cacheKey, audioResult.audioUrl);
+        }
+      } catch (error) {
+        console.error(`TTS generation failed for ${language}:`, error);
+        // Continue with other languages even if one fails
+      }
+    });
+
+    await Promise.allSettled(promises);
+  }
+
+  /**
+   * Update TTS configuration
+   */
+  updateTTSConfig(config: Partial<TTSConfig>): void {
+    if (this.config.tts) {
+      this.config.tts = { ...this.config.tts, ...config };
+    } else {
+      this.config.tts = config as TTSConfig;
+    }
+
+    if (this.ttsManager) {
+      this.ttsManager.updateConfig({
+        mode: this.config.tts.mode,
+        enabledLanguages: this.config.tts.enabledLanguages,
+        region: this.config.region,
+        identityPoolId: this.config.identityPoolId,
+        userPoolId: this.config.userPoolId,
+        jwtToken: this.config.jwtToken
+      });
+    }
+  }
+
+  /**
+   * Get current TTS configuration
+   */
+  getTTSConfig(): TTSConfig | null {
+    return this.config.tts || null;
+  }
+
+  // WebSocket Session Management Methods
+
+  /**
+   * Connect to WebSocket server
+   */
+  async connectWebSocket(): Promise<void> {
+    if (this.webSocketManager) {
+      await this.webSocketManager.connect();
+    }
+  }
+
+  /**
+   * Create a new session
+   */
+  async createSession(sessionId: string): Promise<void> {
+    if (!this.webSocketManager) {
+      throw new Error('WebSocket manager not initialized');
+    }
+
+    if (!this.config.tts) {
+      throw new Error('TTS configuration not found');
+    }
+
+    const sessionConfig: SessionConfig = {
+      sessionId,
+      enabledLanguages: this.config.tts.enabledLanguages,
+      ttsMode: this.config.tts.mode,
+      audioQuality: this.config.tts.mode === 'neural' ? 'high' : 'medium'
+    };
+
+    await this.webSocketManager.createSession(sessionId, sessionConfig);
+  }
+
+  /**
+   * Update session configuration
+   */
+  async updateSessionConfig(config: Partial<SessionConfig>): Promise<void> {
+    if (!this.webSocketManager) {
+      throw new Error('WebSocket manager not initialized');
+    }
+
+    const currentSession = this.webSocketManager.getCurrentSession();
+    if (!currentSession) {
+      throw new Error('No active session to update');
+    }
+
+    const updatedConfig = { ...currentSession, ...config };
+    await this.webSocketManager.updateSessionConfig(updatedConfig);
+  }
+
+  /**
+   * End current session
+   */
+  async endSession(): Promise<void> {
+    if (this.webSocketManager) {
+      await this.webSocketManager.endSession();
+    }
+  }
+
+  /**
+   * Get current session information
+   */
+  getCurrentSession(): SessionConfig | null {
+    return this.webSocketManager?.getCurrentSession() || null;
+  }
+
+  /**
+   * Disconnect from WebSocket server
+   */
+  disconnectWebSocket(): void {
+    if (this.webSocketManager) {
+      this.webSocketManager.disconnect();
+    }
+  }
+
+  // Cost Tracking Methods
+
+  /**
+   * Get current costs
+   */
+  getCurrentCosts() {
+    return this.costTracker.getCurrentCosts();
+  }
+
+  /**
+   * Reset cost tracking for new session
+   */
+  resetCostTracking(): void {
+    this.costTracker.resetSession();
+  }
+
+  /**
+   * Set cost warning threshold
+   */
+  setCostWarningThreshold(threshold: number): void {
+    this.costTracker.setWarningThreshold(threshold);
+  }
+
+  // Private helper methods
+
+  private hashText(text: string): string {
+    // Simple hash function for caching
+    let hash = 0;
+    for (let i = 0; i < text.length; i++) {
+      const char = text.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    return Math.abs(hash).toString(36);
   }
 }
