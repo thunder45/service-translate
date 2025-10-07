@@ -87,12 +87,20 @@ export class DirectStreamingManager extends EventEmitter {
     }
 
     // Initialize WebSocket Manager if configured
+    console.log('=== WebSocket Manager Initialization ===');
+    console.log('config.tts:', config.tts);
+    console.log('config.tts?.websocketUrl:', config.tts?.websocketUrl);
+    
     if (config.tts?.websocketUrl) {
+      console.log('Initializing WebSocketManager with URL:', config.tts.websocketUrl);
       this.webSocketManager = new WebSocketManager({
         serverUrl: config.tts.websocketUrl,
         reconnectAttempts: 5,
         reconnectDelay: 1000
       });
+      console.log('WebSocketManager initialized successfully');
+    } else {
+      console.log('WebSocketManager NOT initialized - websocketUrl missing');
     }
 
     // Initialize Cost Tracker
@@ -126,12 +134,6 @@ export class DirectStreamingManager extends EventEmitter {
           const totalCharacters = result.text.length * translations.length;
           this.costTracker.trackTranslateUsage(totalCharacters);
           
-          // Generate TTS audio if enabled
-          const audioUrls = new Map<TargetLanguage, string>();
-          if (this.ttsManager && this.config.tts?.mode !== 'disabled' && this.config.tts?.mode !== 'local') {
-            await this.generateTTSAudio(translations, audioUrls);
-          }
-          
           // Send to Holyrics if configured
           if (this.holyricsIntegration && this.config.holyrics) {
             const holyricsLanguage = this.config.holyrics.language;
@@ -154,15 +156,27 @@ export class DirectStreamingManager extends EventEmitter {
             }
           }
           
-          // Broadcast to WebSocket clients if connected
+          // Send to TTS Server if connected
           if (this.webSocketManager && this.webSocketManager.isConnectedToServer()) {
-            this.webSocketManager.broadcastTranslation(result.text, translations, audioUrls);
+            // Convert translations to simple object
+            const translationsObj: Record<string, string> = {};
+            translations.forEach(t => {
+              // Extract language code (en from en-US)
+              const langCode = t.targetLanguage.split('-')[0];
+              translationsObj[langCode] = t.text;
+            });
+            
+            await this.webSocketManager.sendTranslations({
+              original: result.text,
+              translations: translationsObj,
+              generateTTS: this.config.tts?.mode !== 'disabled' && this.config.tts?.mode !== 'local',
+              voiceType: this.config.tts?.mode === 'neural' ? 'neural' : 'standard'
+            });
           }
           
           this.emit('translation', {
             originalText: result.text,
             translations: translations,
-            audioUrls: audioUrls,
             timestamp: new Date().toISOString(),
           });
         } catch (error) {
@@ -257,6 +271,12 @@ export class DirectStreamingManager extends EventEmitter {
     try {
       console.log('Starting local streaming...');
       
+      // Connect WebSocket if configured
+      if (this.webSocketManager) {
+        console.log('Connecting to WebSocket server...');
+        await this.webSocketManager.connect();
+      }
+      
       // Start transcription stream
       await this.transcribeClient.startStreaming();
       
@@ -294,6 +314,11 @@ export class DirectStreamingManager extends EventEmitter {
       
       // Stop transcription stream
       await this.transcribeClient.stopStreaming();
+      
+      // Disconnect WebSocket
+      if (this.webSocketManager) {
+        this.webSocketManager.disconnect();
+      }
       
       this.isActive = false;
       this.emit('streaming-stopped');
@@ -431,6 +456,13 @@ export class DirectStreamingManager extends EventEmitter {
   async createSession(sessionId: string): Promise<void> {
     if (!this.webSocketManager) {
       throw new Error('WebSocket manager not initialized');
+    }
+
+    // Auto-connect if not connected
+    if (!this.webSocketManager.isConnectedToServer()) {
+      console.log('WebSocket not connected, connecting now...');
+      await this.webSocketManager.connect();
+      console.log('WebSocket connected successfully');
     }
 
     if (!this.config.tts) {

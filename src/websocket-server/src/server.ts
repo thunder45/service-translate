@@ -7,6 +7,7 @@ import { MessageRouter } from './message-router';
 import { AudioManager } from './audio-manager';
 import { ServerErrorLogger } from './error-logger';
 import { SecurityMiddleware, SecurityConfig } from './security-middleware';
+import { PollyService } from './polly-service';
 
 const app = express();
 const server = createServer(app);
@@ -17,6 +18,15 @@ const errorLogger = new ServerErrorLogger();
 // Initialize session manager and audio manager
 const sessionManager = new SessionManager();
 const audioManager = new AudioManager();
+
+// Initialize Polly service (optional)
+const pollyService = new PollyService({
+  region: process.env.AWS_REGION || 'us-east-1',
+  identityPoolId: process.env.AWS_IDENTITY_POOL_ID || '',
+  userPoolId: process.env.AWS_USER_POOL_ID || '',
+  jwtToken: process.env.AWS_JWT_TOKEN || '',
+  enabled: process.env.ENABLE_TTS === 'true'
+});
 
 // Initialize security middleware
 const securityConfig: SecurityConfig = {
@@ -39,6 +49,7 @@ const securityConfig: SecurityConfig = {
     maxSessionAge: parseInt(process.env.SESSION_TIMEOUT_MINUTES || '480') * 60 * 1000,
   },
   enableLogging: true,
+  autoGenerateSessionIds: process.env.AUTO_GENERATE_SESSION_IDS === 'true', // Default: false
 };
 
 const securityMiddleware = new SecurityMiddleware(securityConfig);
@@ -52,7 +63,7 @@ app.use(cors({
 // Initialize Socket.IO with CORS configuration
 const io = new SocketIOServer(server, {
   cors: {
-    origin: ["http://localhost:3000", "http://localhost:8080", "http://127.0.0.1:3000"],
+    origin: "*", // Allow all origins for local development (Electron app uses file:// protocol)
     methods: ["GET", "POST"],
     credentials: true
   }
@@ -228,14 +239,19 @@ io.on('connection', (socket) => {
 
   // Route all message types through the message router with security
   socket.on('start-session', secureMessageHandler('start-session', (data) => {
-    // Generate secure session ID
+    console.log(`[${socket.id}] ← start-session:`, JSON.stringify(data, null, 2));
+    // Optionally generate secure session ID
     if (data && typeof data === 'object') {
-      data.sessionId = securityMiddleware.generateSessionId(securityContext);
+      const generatedId = securityMiddleware.generateSessionId(securityContext, data.sessionId);
+      if (generatedId) {
+        data.sessionId = generatedId;
+      }
     }
     messageRouter.routeMessage(socket, 'start-session', data);
   }));
   
   socket.on('join-session', secureMessageHandler('join-session', (data) => {
+    console.log(`[${socket.id}] ← join-session:`, JSON.stringify(data, null, 2));
     // Validate session join
     if (data && data.sessionId) {
       if (!securityMiddleware.validateSessionJoin(securityContext, data.sessionId)) {
@@ -250,18 +266,29 @@ io.on('connection', (socket) => {
     messageRouter.routeMessage(socket, 'join-session', data);
   }));
   
-  socket.on('leave-session', secureMessageHandler('leave-session', (data) => 
-    messageRouter.routeMessage(socket, 'leave-session', data)));
-  socket.on('change-language', secureMessageHandler('change-language', (data) => 
-    messageRouter.routeMessage(socket, 'change-language', data)));
-  socket.on('config-update', secureMessageHandler('config-update', (data) => 
-    messageRouter.routeMessage(socket, 'config-update', data)));
-  socket.on('tts-config-update', secureMessageHandler('tts-config-update', (data) => 
-    messageRouter.routeMessage(socket, 'tts-config-update', data)));
-  socket.on('language-update', secureMessageHandler('language-update', (data) => 
-    messageRouter.routeMessage(socket, 'language-update', data)));
+  socket.on('leave-session', secureMessageHandler('leave-session', (data) => {
+    console.log(`[${socket.id}] ← leave-session:`, JSON.stringify(data, null, 2));
+    messageRouter.routeMessage(socket, 'leave-session', data);
+  }));
+  socket.on('change-language', secureMessageHandler('change-language', (data) => {
+    console.log(`[${socket.id}] ← change-language:`, JSON.stringify(data, null, 2));
+    messageRouter.routeMessage(socket, 'change-language', data);
+  }));
+  socket.on('config-update', secureMessageHandler('config-update', (data) => {
+    console.log(`[${socket.id}] ← config-update:`, JSON.stringify(data, null, 2));
+    messageRouter.routeMessage(socket, 'config-update', data);
+  }));
+  socket.on('tts-config-update', secureMessageHandler('tts-config-update', (data) => {
+    console.log(`[${socket.id}] ← tts-config-update:`, JSON.stringify(data, null, 2));
+    messageRouter.routeMessage(socket, 'tts-config-update', data);
+  }));
+  socket.on('language-update', secureMessageHandler('language-update', (data) => {
+    console.log(`[${socket.id}] ← language-update:`, JSON.stringify(data, null, 2));
+    messageRouter.routeMessage(socket, 'language-update', data);
+  }));
   
   socket.on('generate-tts', secureMessageHandler('generate-tts', (data) => {
+    console.log(`[${socket.id}] ← generate-tts:`, JSON.stringify(data, null, 2));
     // Check Polly rate limit for TTS requests
     if (!securityMiddleware.checkPollyRateLimit(securityContext)) {
       socket.emit('tts-rate-limited', {
@@ -273,11 +300,64 @@ io.on('connection', (socket) => {
     messageRouter.routeMessage(socket, 'generate-tts', data);
   }));
   
-  socket.on('broadcast-translation', secureMessageHandler('broadcast-translation', (data) => 
-    messageRouter.routeMessage(socket, 'broadcast-translation', data)));
+  socket.on('broadcast-translation', secureMessageHandler('broadcast-translation', async (data) => {
+    console.log(`[${socket.id}] ← broadcast-translation:`, JSON.stringify(data, null, 2));
+    
+    // Generate TTS if enabled and requested
+    if (data.generateTTS && pollyService.isEnabled() && data.translations) {
+      const audioResults: any[] = [];
+      
+      for (const [language, text] of Object.entries(data.translations)) {
+        try {
+          const audioBuffer = await pollyService.generateAudio(
+            text as string, 
+            language, 
+            data.voiceType || 'neural'
+          );
+          
+          if (audioBuffer) {
+            const audioInfo = await audioManager.storeAudioFile(
+              audioBuffer,
+              text as string,
+              language as any,
+              data.voiceType || 'neural',
+              'mp3'
+            );
+            
+            audioResults.push({
+              language,
+              text,
+              audioUrl: audioInfo.url,
+              audioMetadata: {
+                audioId: audioInfo.id,
+                url: audioInfo.url,
+                duration: audioInfo.duration,
+                format: audioInfo.format,
+                voiceType: audioInfo.voiceType,
+                size: audioInfo.size
+              }
+            });
+          } else {
+            // TTS failed, send text only
+            audioResults.push({ language, text, audioUrl: null });
+          }
+        } catch (error) {
+          console.error(`TTS generation failed for ${language}:`, error);
+          audioResults.push({ language, text, audioUrl: null });
+        }
+      }
+      
+      // Broadcast with audio
+      data.audioResults = audioResults;
+    }
+    
+    messageRouter.routeMessage(socket, 'broadcast-translation', data);
+  }));
 
   // Handle disconnection
   socket.on('disconnect', (reason) => {
+    console.log(`=== CLIENT DISCONNECTED: ${socket.id} ===`);
+    console.log(`Reason: ${reason}`);
     errorLogger.logConnection('disconnect', socket.id, { reason });
     
     // Handle security cleanup
@@ -290,7 +370,9 @@ io.on('connection', (socket) => {
   
   // Basic ping/pong for connection health
   socket.on('ping', () => {
+    console.log(`[${socket.id}] ← ping`);
     socket.emit('pong', { timestamp: new Date().toISOString() });
+    console.log(`[${socket.id}] → pong`);
   });
 });
 

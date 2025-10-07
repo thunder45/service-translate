@@ -12,33 +12,39 @@ A comprehensive real-time translation system that includes:
 - **Cross-Platform Support**: Works on Windows 10/11 and macOS 10.15+
 - **Hybrid TTS**: AWS Polly cloud voices with local Web Speech API fallback
 
-## 🏗️ Local TTS Architecture
+## 🏗️ Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    Admin Machine                        │
-│  ┌──────────────────┐    ┌──────────────────────────┐  │
-│  │  Electron App    │    │   Local WebSocket        │  │
-│  │  (Transcription) │◄──►│   Server (Node.js)       │  │
-│  │  + AWS Services  │    │   + Session Management   │  │
-│  └────────┬─────────┘    └──────────┬───────────────┘  │
-│           │ AWS Polly                │ Local Network    │
-│           ▼ (Cloud TTS)              ▼ (Church WiFi)   │
-│  ┌──────────────────┐    ┌──────────────────────────┐  │
-│  │   Audio Files    │    │   HTTP Server            │  │
-│  │  (Local Storage) │◄──►│   (Audio Serving)        │  │
-│  └──────────────────┘    └──────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
-                                    │
-                    ┌───────────────┼───────────────┐
-                    │               │               │
-                    ▼               ▼               ▼
-            ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-            │ PWA Client 1 │ │ PWA Client 2 │ │ PWA Client N │
-            │ (Phone/Web)  │ │ (Tablet/Web) │ │ (Laptop/Web) │
-            │ Local TTS +  │ │ Local TTS +  │ │ Local TTS +  │
-            │ Cloud Audio  │ │ Cloud Audio  │ │ Cloud Audio  │
-            └──────────────┘ └──────────────┘ └──────────────┘
+│                    Capture App                          │
+│  ┌──────────────┐    ┌──────────────┐                  │
+│  │   Audio      │───▶│  Transcribe  │                  │
+│  │   Capture    │    │   (AWS)      │                  │
+│  └──────────────┘    └──────┬───────┘                  │
+│                              │                           │
+│                              ▼                           │
+│                      ┌──────────────┐                   │
+│                      │  Translate   │                   │
+│                      │   (AWS)      │                   │
+│                      └──────┬───────┘                   │
+│                             │                            │
+│              ┌──────────────┴──────────────┐            │
+│              ▼                              ▼            │
+│      ┌──────────────┐              ┌──────────────┐    │
+│      │  Holyrics    │              │  TTS Server  │    │
+│      │  (Optional)  │              │  + Polly TTS │    │
+│      └──────────────┘              └──────┬───────┘    │
+└─────────────────────────────────────────────┼──────────┘
+                                              │
+                    ┌─────────────────────────┼─────────────────────┐
+                    │                         │                     │
+                    ▼                         ▼                     ▼
+            ┌──────────────┐        ┌──────────────┐      ┌──────────────┐
+            │ PWA Client 1 │        │ PWA Client 2 │      │ PWA Client N │
+            │ (Phone/Web)  │        │ (Tablet/Web) │      │ (Laptop/Web) │
+            │ Server Audio │        │ Server Audio │      │ Server Audio │
+            │ or Local TTS │        │ or Local TTS │      │ or Local TTS │
+            └──────────────┘        └──────────────┘      └──────────────┘
 ```
 
 ### 🚀 Key Benefits:
@@ -54,15 +60,15 @@ A comprehensive real-time translation system that includes:
 ### Admin Application
 - **Platform**: Electron with TypeScript
 - **Audio Processing**: AWS Transcribe Streaming + AWS Translate
-- **TTS**: AWS Polly integration with cost tracking
-- **Authentication**: Cognito User Pool + Identity Pool
 - **Integrations**: Holyrics API, WebSocket client
+- **Authentication**: Cognito User Pool + Identity Pool
 
-### WebSocket Server  
+### TTS Server (WebSocket Server)
 - **Platform**: Node.js with TypeScript
 - **Framework**: Socket.IO for real-time communication
-- **Security**: Rate limiting, session validation, authentication middleware
+- **TTS**: AWS Polly integration (optional)
 - **Audio**: Local file serving with HTTP endpoints
+- **Security**: Rate limiting, session validation, authentication middleware
 - **Monitoring**: Comprehensive logging and health checks
 
 ### Progressive Web App
@@ -81,25 +87,26 @@ src/
 │   └── lambdas/handlers/ # WebSocket Lambda functions
 ├── capture/              # Cross-platform Electron application ✅
 │   ├── src/             # TypeScript source
-│   │   ├── main.ts      # Electron main process with TTS integration
+│   │   ├── main.ts      # Electron main process
 │   │   ├── audio-capture.ts # Cross-platform audio capture
-│   │   ├── direct-streaming-manager.ts # Enhanced with TTS & WebSocket
-│   │   ├── tts-manager.ts # AWS Polly TTS integration
-│   │   ├── websocket-manager.ts # WebSocket client for server communication
+│   │   ├── direct-streaming-manager.ts # Transcribe + Translate orchestration
+│   │   ├── websocket-manager.ts # WebSocket client for TTS server
 │   │   ├── cost-tracker.ts # Real-time cost monitoring
 │   │   ├── holyrics-integration.ts # Holyrics API integration
 │   │   └── monitoring-dashboard.ts # Performance monitoring
 │   ├── setup.sh        # macOS setup script
 │   ├── setup-windows.ps1 # Windows setup script
 │   └── package.json
-├── websocket-server/     # Local WebSocket server ✅
+├── websocket-server/     # TTS Server with WebSocket ✅
 │   ├── src/             # TypeScript source
 │   │   ├── server.ts    # Main server with Socket.IO
+│   │   ├── polly-service.ts # AWS Polly TTS integration
 │   │   ├── session-manager.ts # Session lifecycle management
 │   │   ├── audio-manager.ts # Audio file management and serving
-│   │   ├── tts-service.ts # AWS Polly integration
 │   │   ├── security-middleware.ts # Authentication and rate limiting
 │   │   └── analytics-manager.ts # Usage analytics and monitoring
+│   ├── .env.example     # Environment configuration template
+│   ├── setup-tts.sh     # TTS configuration script
 │   └── package.json
 ├── client-pwa/           # Progressive Web Application ✅
 │   ├── app.js           # Main PWA application
@@ -132,42 +139,55 @@ npm run deploy
 ./first-login.sh admin@example.com <ClientId> <NewPassword>
 ```
 
-### 3. Setup Local Environment
+### 3. Setup TTS Server
 ```bash
-# Install all dependencies
-npm run install:all
-
-# Run automated setup
-npm run setup
-
-# For development
-npm run setup:dev
+cd src/websocket-server
+npm install
+./setup-tts.sh  # Interactive configuration
+# Or manually: cp .env.example .env && nano .env
 ```
 
-### 4. Start All Services
+### 4. Setup Capture App
 ```bash
-# Start everything in local mode
-npm run start:local
-
-# Or start services individually
-npm run start:server    # WebSocket server
-npm run start:pwa       # PWA HTTP server  
-npm run start:capture   # Admin application
+cd src/capture
+npm install
+# Configure AWS credentials in the app UI
 ```
 
-### 5. Configure and Use
-1. **Admin App**: Configure AWS credentials and audio settings
-2. **Create Session**: Start a session with a simple ID (e.g., "CHURCH-2025-001")
-3. **Client Access**: Share the client URL with congregation members
-4. **Start Translation**: Begin speaking and see real-time translations with TTS
+### 5. Start All Services
+```bash
+# Start TTS Server
+cd src/websocket-server
+npm start
+
+# Start PWA (in another terminal)
+cd src/client-pwa
+npm start
+
+# Start Capture App (in another terminal)
+cd src/capture
+npm start
+```
 
 ## 🔧 Key Implementation Details
 
-### Local Audio Processing Pipeline
-1. **macOS Audio Capture**: Real microphone input via sox command-line tool
-2. **Direct AWS Transcribe Streaming**: Real-time Portuguese speech-to-text
-3. **Direct AWS Translate**: Multi-language translation (EN, ES, FR, DE, IT)
-4. **Local Display**: Real-time results shown in the application window
+### Translation Pipeline
+1. **Audio Capture**: Real microphone input via sox (macOS) or native (Windows)
+2. **AWS Transcribe Streaming**: Real-time Portuguese speech-to-text
+3. **AWS Translate**: Multi-language translation (EN, ES, FR, DE, IT)
+4. **Holyrics Display**: Optional display on church screens
+5. **TTS Server**: Sends translations to TTS Server for processing
+
+### TTS Processing (Server-Side)
+1. **Receive Translations**: TTS Server receives text from capture app
+2. **Generate Audio**: Calls AWS Polly for each enabled language (optional)
+3. **Store & Serve**: Saves audio files and serves via HTTP
+4. **Broadcast**: Sends translations + audio URLs to all clients
+
+### Client Audio Options
+1. **Server Audio**: High-quality AWS Polly voices (if TTS enabled)
+2. **Local TTS**: Browser Web Speech API (free, works offline)
+3. **Text-Only**: Display translations without audio
 
 ### Authentication & Security
 - **Cognito User Pool**: Admin authentication with JWT tokens
@@ -186,15 +206,15 @@ npm run start:capture   # Admin application
 ### Admin Application - Complete ✅
 - **Cross-platform support**: Windows 10/11 and macOS 10.15+
 - **Audio capture**: Real-time audio with device selection and VU meter
-- **AWS integration**: Transcribe, Translate, and Polly services
-- **TTS management**: Cost tracking and quality control
-- **WebSocket client**: Session management and broadcasting
+- **AWS integration**: Transcribe and Translate services
+- **WebSocket client**: Session management and translation broadcasting
 - **Holyrics integration**: Direct API integration for church displays
 - **Security**: Encrypted credential storage with auto-expiration
 
-### WebSocket Server - Complete ✅
+### TTS Server - Complete ✅
 - **Session management**: Create, join, and manage translation sessions
 - **Real-time broadcasting**: Instant text and audio delivery
+- **AWS Polly integration**: Optional TTS generation (neural/standard voices)
 - **Security middleware**: Authentication, rate limiting, and validation
 - **Audio serving**: Local HTTP server for Polly-generated audio files
 - **Analytics**: Comprehensive monitoring and performance tracking
@@ -233,7 +253,14 @@ npm run start:capture   # Admin application
 
 ## 💡 Architecture Benefits
 
-### Why Local Network Architecture?
+### Why TTS Server Architecture?
+- **Separation of Concerns**: Capture app focuses on transcription/translation
+- **Centralized TTS**: One place for Polly logic and audio management
+- **Flexible Deployment**: TTS Server can run on different machine if needed
+- **Better Scalability**: Multiple capture apps can share one TTS Server
+- **Easier Debugging**: Clear separation between transcription and TTS
+
+### Why Local Network?
 - **Cost Effective**: No cloud infrastructure costs beyond AWS services
 - **High Performance**: Local network latency for client communication
 - **Scalable**: Supports 50+ concurrent clients per session

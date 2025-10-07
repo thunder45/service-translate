@@ -68,10 +68,16 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, '../preload.js'),
+      webSecurity: false, // Disable for local development to allow localhost requests
     },
   });
 
   mainWindow.loadFile(path.join(__dirname, '../index.html'));
+  
+  // Open DevTools in development mode
+  if (process.env.NODE_ENV === 'development') {
+    mainWindow.webContents.openDevTools();
+  }
   
   mainWindow.on('closed', () => {
     mainWindow = null;

@@ -430,52 +430,49 @@ export class MessageRouter {
    * Handle translation broadcasting (admin only)
    */
   private async handleTranslationBroadcast(socket: Socket, data: any): Promise<void> {
-    const validation = MessageValidator.validateTranslationBroadcast(data);
-    if (!validation.valid || !validation.message) {
-      this.sendError(socket, 400, validation.error || 'Invalid translation broadcast message');
+    const { sessionId, translations, audioResults, original } = data;
+    
+    if (!sessionId) {
+      this.sendError(socket, 400, 'Missing sessionId');
       return;
     }
 
-    const message = validation.message;
-    
-    // Get session to check TTS configuration
-    const session = this.sessionManager.getSession(message.sessionId);
+    const session = this.sessionManager.getSession(sessionId);
     if (!session) {
-      this.sendError(socket, 404, 'Session not found', { sessionId: message.sessionId });
+      this.sendError(socket, 404, 'Session not found', { sessionId });
       return;
     }
 
-    // Generate TTS audio if enabled and not cached
-    if (session.config.ttsMode !== 'disabled' && session.config.ttsMode !== 'local') {
-      await this.generateAndCacheTTS(message, session.config.ttsMode);
-    }
-
-    // Get clients for the specific language
-    const targetClients = this.sessionManager.getClientsByLanguage(message.sessionId, message.language);
+    // Broadcast to all clients in session
+    const clients = this.sessionManager.getSessionClients(sessionId);
     
-    if (targetClients.length === 0) {
-      console.log(`No clients found for language ${message.language} in session ${message.sessionId}`);
+    if (clients.length === 0) {
+      console.log(`No clients in session ${sessionId}`);
       return;
     }
 
-    // Filter clients based on their audio capabilities
-    const clientsWithCapabilities = this.sessionManager.getSessionClients(message.sessionId)
-      .filter(client => client.preferredLanguage === message.language);
-
-    // Customize message for each client based on their capabilities
-    clientsWithCapabilities.forEach(client => {
-      const customMessage = { ...message };
+    // Send to each client based on their language preference
+    clients.forEach(client => {
+      const lang = client.preferredLanguage;
+      const translatedText = translations?.[lang];
+      const audioResult = audioResults?.find((a: any) => a.language === lang);
       
-      // Determine if client should use local TTS
-      if (session.config.ttsMode === 'local' || 
-          (session.config.ttsMode !== 'disabled' && !message.audioUrl)) {
-        customMessage.useLocalTTS = client.audioCapabilities.localTTSLanguages.includes(message.language);
+      if (translatedText) {
+        this.io.to(client.socketId).emit('translation', {
+          type: 'translation',
+          sessionId,
+          original,
+          text: translatedText,
+          language: lang,
+          timestamp: Date.now(),
+          audioUrl: audioResult?.audioUrl || null,
+          audioMetadata: audioResult?.audioMetadata || null,
+          ttsAvailable: !!audioResult?.audioUrl
+        });
       }
-
-      this.io.to(client.socketId).emit('translation', customMessage);
     });
     
-    console.log(`Broadcasted translation to ${targetClients.length} clients for language: ${message.language}`);
+    console.log(`Broadcasted translations to ${clients.length} clients in session ${sessionId}`);
   }
 
   /**

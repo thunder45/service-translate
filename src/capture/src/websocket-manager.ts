@@ -199,7 +199,30 @@ export class WebSocketManager extends EventEmitter {
   }
 
   /**
-   * Broadcast translation to clients
+   * Send translations to TTS server for processing
+   */
+  async sendTranslations(data: {
+    original: string;
+    translations: Record<string, string>;
+    generateTTS?: boolean;
+    voiceType?: 'neural' | 'standard';
+  }): Promise<void> {
+    if (!this.isConnected || !this.socket || !this.currentSession) {
+      console.warn('Cannot send translations: not connected or no active session');
+      return;
+    }
+
+    this.socket.emit('broadcast-translation', {
+      sessionId: this.currentSession.sessionId,
+      original: data.original,
+      translations: data.translations,
+      generateTTS: data.generateTTS ?? true,
+      voiceType: data.voiceType ?? 'neural'
+    });
+  }
+
+  /**
+   * Broadcast translation to clients (legacy method - kept for compatibility)
    */
   broadcastTranslation(originalText: string, translations: Array<{targetLanguage: TargetLanguage; text: string}>, audioUrls?: Map<TargetLanguage, string>): void {
     if (!this.isConnected || !this.socket || !this.currentSession) {

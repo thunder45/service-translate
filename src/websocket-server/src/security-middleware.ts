@@ -13,6 +13,7 @@ export interface SecurityConfig {
   rateLimit: RateLimitConfig;
   sessionSecurity: SessionSecurityConfig;
   enableLogging: boolean;
+  autoGenerateSessionIds?: boolean; // Default: false
 }
 
 export interface SecurityContext {
@@ -141,9 +142,13 @@ export class SecurityMiddleware {
   }
 
   /**
-   * Generate secure session ID
+   * Generate secure session ID (if enabled)
    */
-  public generateSessionId(adminContext: SecurityContext): string {
+  public generateSessionId(adminContext: SecurityContext, clientProvidedId?: string): string | undefined {
+    if (!this.config.autoGenerateSessionIds) {
+      return clientProvidedId;
+    }
+
     const metadata = {
       adminId: adminContext.authSession,
       ipAddress: adminContext.ipAddress,

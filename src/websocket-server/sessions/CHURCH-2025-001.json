@@ -1,0 +1,18 @@
+{
+  "sessionId": "CHURCH-2025-001",
+  "adminSocketId": "rMZk5G5h-GWCgopJAAAB",
+  "config": {
+    "sessionId": "CHURCH-2025-001",
+    "enabledLanguages": [
+      "en",
+      "es",
+      "fr"
+    ],
+    "ttsMode": "neural",
+    "audioQuality": "high"
+  },
+  "clients": [],
+  "createdAt": "2025-10-07T13:50:58.852Z",
+  "lastActivity": "2025-10-07T13:51:57.451Z",
+  "status": "started"
+}
