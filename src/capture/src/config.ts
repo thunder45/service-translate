@@ -30,18 +30,44 @@ export interface AppConfig {
     maxLines: number;
   };
   // TTS settings
-  tts?: {
+  tts: {
     mode: 'neural' | 'standard' | 'local' | 'disabled';
     host: string;
     port: number;
   };
 }
 
+export function validateConfig(config: AppConfig): string[] {
+  const errors: string[] = [];
+  
+  if (!config.userPoolId) errors.push('userPoolId is required');
+  if (!config.clientId) errors.push('clientId is required');
+  if (!config.identityPoolId) errors.push('identityPoolId is required');
+  if (!config.region) errors.push('region is required');
+  if (!config.sourceLanguage) errors.push('sourceLanguage is required');
+  if (!config.targetLanguages?.length) errors.push('At least one target language is required');
+  if (!config.tts?.host) errors.push('TTS host is required');
+  if (!config.tts?.port) errors.push('TTS port is required');
+  if (config.tts?.port && (config.tts.port < 1 || config.tts.port > 65535)) {
+    errors.push('TTS port must be between 1 and 65535');
+  }
+  
+  return errors;
+}
+
 export function loadConfig(): AppConfig | null {
   try {
     if (fs.existsSync(configPath)) {
       const data = fs.readFileSync(configPath, 'utf8');
-      return JSON.parse(data);
+      const config = JSON.parse(data);
+      
+      // Validate config
+      const errors = validateConfig(config);
+      if (errors.length > 0) {
+        console.warn('Config validation warnings:', errors);
+      }
+      
+      return config;
     }
   } catch (error) {
     console.error('Failed to load config:', error);
@@ -51,8 +77,15 @@ export function loadConfig(): AppConfig | null {
 
 export function saveConfig(config: AppConfig): void {
   try {
+    // Validate before saving
+    const errors = validateConfig(config);
+    if (errors.length > 0) {
+      throw new Error(`Invalid config: ${errors.join(', ')}`);
+    }
+    
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
   } catch (error) {
     console.error('Failed to save config:', error);
+    throw error;
   }
 }

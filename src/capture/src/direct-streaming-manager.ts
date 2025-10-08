@@ -324,6 +324,25 @@ export class DirectStreamingManager extends EventEmitter {
     return this.isActive;
   }
 
+  async cleanup(): Promise<void> {
+    await this.stopStreaming();
+    
+    if (this.transcribeClient) {
+      this.transcribeClient.removeAllListeners();
+    }
+    
+    if (this.translationService) {
+      this.translationService.removeAllListeners();
+    }
+    
+    if (this.ttsManager) {
+      this.ttsManager.removeAllListeners();
+    }
+    
+    this.audioCache.clear();
+    this.removeAllListeners();
+  }
+
   private async restartTranscription(): Promise<void> {
     if (!this.isActive) return;
     

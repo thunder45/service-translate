@@ -95,7 +95,8 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, '../preload.js'),
-      webSecurity: false, // Disable for local development to allow localhost requests
+      webSecurity: true,
+      allowRunningInsecureContent: false,
     },
   });
 
@@ -116,6 +117,29 @@ app.whenReady().then(createWindow);
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
+  }
+});
+
+app.on('before-quit', async () => {
+  // Cleanup streaming manager
+  if (streamingManager) {
+    try {
+      await streamingManager.cleanup();
+      streamingManager = null;
+    } catch (error) {
+      console.error('Error cleaning up streaming manager:', error);
+    }
+  }
+  
+  // Cleanup WebSocket manager
+  if (webSocketManager) {
+    try {
+      webSocketManager.disconnect();
+      webSocketManager.removeAllListeners();
+      webSocketManager = null;
+    } catch (error) {
+      console.error('Error cleaning up WebSocket manager:', error);
+    }
   }
 });
 

@@ -63,7 +63,21 @@ app.use(cors({
 // Initialize Socket.IO with CORS configuration
 const io = new SocketIOServer(server, {
   cors: {
-    origin: "*", // Allow all origins for local development (Electron app uses file:// protocol)
+    origin: (origin, callback) => {
+      const allowedOrigins = [
+        'http://localhost:3000',
+        'http://localhost:8080',
+        'http://127.0.0.1:3000',
+        'http://127.0.0.1:8080'
+      ];
+      // Allow Electron (file:// protocol has no origin) and allowed origins
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        console.warn('CORS blocked origin:', origin);
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     methods: ["GET", "POST"],
     credentials: true
   }
