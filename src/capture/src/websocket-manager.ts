@@ -175,7 +175,69 @@ export class WebSocketManager extends EventEmitter {
     this.socket.emit('admin-message', message);
     this.currentSession = config;
     this.sessionStateBackup = { ...config }; // Backup for recovery
+    this.persistActiveSession(sessionId);
     this.emit('session-created', sessionId, config);
+  }
+
+  async reconnectToSession(sessionId: string): Promise<boolean> {
+    if (!this.isConnected || !this.socket) {
+      return false;
+    }
+
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => resolve(false), 5000);
+
+      this.socket!.once('session-joined', (metadata: any) => {
+        clearTimeout(timeout);
+        this.currentSession = {
+          sessionId,
+          enabledLanguages: metadata.availableLanguages,
+          ttsMode: metadata.config.ttsMode,
+          audioQuality: metadata.config.audioQuality
+        };
+        this.sessionStateBackup = { ...this.currentSession };
+        this.emit('session-reconnected', this.currentSession);
+        resolve(true);
+      });
+
+      this.socket!.once('session-join-failed', () => {
+        clearTimeout(timeout);
+        this.clearActiveSession();
+        resolve(false);
+      });
+
+      this.socket!.emit('join-session', {
+        sessionId,
+        preferredLanguage: 'en-US',
+        audioCapabilities: { supportsPolly: true, localTTSLanguages: [], audioFormats: ['mp3'] }
+      });
+    });
+  }
+
+  private persistActiveSession(sessionId: string): void {
+    try {
+      const { loadConfig, saveConfig } = require('./config');
+      const config = loadConfig();
+      if (config && config.tts) {
+        config.tts.activeSessionId = sessionId;
+        saveConfig(config);
+      }
+    } catch (error) {
+      console.error('Failed to persist active session:', error);
+    }
+  }
+
+  private clearActiveSession(): void {
+    try {
+      const { loadConfig, saveConfig } = require('./config');
+      const config = loadConfig();
+      if (config && config.tts) {
+        delete config.tts.activeSessionId;
+        saveConfig(config);
+      }
+    } catch (error) {
+      console.error('Failed to clear active session:', error);
+    }
   }
 
   /**
@@ -266,6 +328,7 @@ export class WebSocketManager extends EventEmitter {
     });
 
     this.currentSession = null;
+    this.clearActiveSession();
     this.emit('session-ended');
   }
 

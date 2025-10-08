@@ -340,6 +340,19 @@ ipcMain.handle('connect-websocket', async () => {
     
     await webSocketManager.connect();
     console.log('WebSocket connected successfully');
+    
+    // Try to reconnect to active session if exists
+    if (config?.tts?.activeSessionId) {
+      console.log('Found active session, attempting to reconnect:', config.tts.activeSessionId);
+      const reconnected = await webSocketManager.reconnectToSession(config.tts.activeSessionId);
+      if (reconnected) {
+        console.log('Successfully reconnected to session:', config.tts.activeSessionId);
+        mainWindow?.webContents.send('session-reconnected', config.tts.activeSessionId);
+      } else {
+        console.log('Failed to reconnect to session, it may have ended');
+      }
+    }
+    
     return { success: true };
   } catch (error: any) {
     console.error('WebSocket connection error:', error);
