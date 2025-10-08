@@ -9,9 +9,8 @@ import { CostTracker } from './cost-tracker';
 
 interface TTSConfig {
   mode: TTSMode;
-  enabledLanguages: TargetLanguage[];
-  websocketUrl?: string;
-  sessionId?: string;
+  host?: string;
+  port?: number;
 }
 
 interface StreamingConfig {
@@ -19,7 +18,6 @@ interface StreamingConfig {
   identityPoolId: string;
   userPoolId: string;
   jwtToken: string;
-  languageCode: string;
   sourceLanguage: string;
   targetLanguages: string[];
   sampleRate: number;
@@ -40,7 +38,11 @@ export class DirectStreamingManager extends EventEmitter {
   private isActive = false;
   private audioCache: Map<string, string> = new Map(); // Cache for generated audio URLs
 
-  constructor(config: StreamingConfig) {
+  private mapToTargetLanguages(languages: string[]): TargetLanguage[] {
+    return languages.map(lang => `${lang}-${lang.toUpperCase()}` as TargetLanguage);
+  }
+
+  constructor(config: StreamingConfig, webSocketManager?: WebSocketManager | null) {
     super();
     this.config = config;
 
@@ -82,25 +84,24 @@ export class DirectStreamingManager extends EventEmitter {
         userPoolId: config.userPoolId,
         jwtToken: config.jwtToken,
         mode: config.tts.mode,
-        enabledLanguages: config.tts.enabledLanguages
+        enabledLanguages: this.mapToTargetLanguages(config.targetLanguages)
       });
     }
 
-    // Initialize WebSocket Manager if configured
-    console.log('=== WebSocket Manager Initialization ===');
-    console.log('config.tts:', config.tts);
-    console.log('config.tts?.websocketUrl:', config.tts?.websocketUrl);
-    
-    if (config.tts?.websocketUrl) {
-      console.log('Initializing WebSocketManager with URL:', config.tts.websocketUrl);
+    // Use provided WebSocketManager or create new one if configured
+    if (webSocketManager) {
+      this.webSocketManager = webSocketManager;
+      console.log('Using provided WebSocketManager instance');
+    } else if (config.tts?.host && config.tts?.port) {
+      const serverUrl = `ws://${config.tts.host}:${config.tts.port}`;
+      console.log('Creating new WebSocketManager with URL:', serverUrl);
       this.webSocketManager = new WebSocketManager({
-        serverUrl: config.tts.websocketUrl,
+        serverUrl,
         reconnectAttempts: 5,
         reconnectDelay: 1000
       });
-      console.log('WebSocketManager initialized successfully');
     } else {
-      console.log('WebSocketManager NOT initialized - websocketUrl missing');
+      console.log('WebSocketManager NOT initialized - no instance provided and host/port missing');
     }
 
     // Initialize Cost Tracker
@@ -271,12 +272,6 @@ export class DirectStreamingManager extends EventEmitter {
     try {
       console.log('Starting local streaming...');
       
-      // Connect WebSocket if configured
-      if (this.webSocketManager) {
-        console.log('Connecting to WebSocket server...');
-        await this.webSocketManager.connect();
-      }
-      
       // Start transcription stream
       await this.transcribeClient.startStreaming();
       
@@ -314,11 +309,6 @@ export class DirectStreamingManager extends EventEmitter {
       
       // Stop transcription stream
       await this.transcribeClient.stopStreaming();
-      
-      // Disconnect WebSocket
-      if (this.webSocketManager) {
-        this.webSocketManager.disconnect();
-      }
       
       this.isActive = false;
       this.emit('streaming-stopped');
@@ -423,7 +413,7 @@ export class DirectStreamingManager extends EventEmitter {
     if (this.ttsManager) {
       this.ttsManager.updateConfig({
         mode: this.config.tts.mode,
-        enabledLanguages: this.config.tts.enabledLanguages,
+        enabledLanguages: this.mapToTargetLanguages(this.config.targetLanguages),
         region: this.config.region,
         identityPoolId: this.config.identityPoolId,
         userPoolId: this.config.userPoolId,
@@ -458,11 +448,8 @@ export class DirectStreamingManager extends EventEmitter {
       throw new Error('WebSocket manager not initialized');
     }
 
-    // Auto-connect if not connected
     if (!this.webSocketManager.isConnectedToServer()) {
-      console.log('WebSocket not connected, connecting now...');
-      await this.webSocketManager.connect();
-      console.log('WebSocket connected successfully');
+      throw new Error('WebSocket not connected. Please connect first.');
     }
 
     if (!this.config.tts) {
@@ -471,7 +458,7 @@ export class DirectStreamingManager extends EventEmitter {
 
     const sessionConfig: SessionConfig = {
       sessionId,
-      enabledLanguages: this.config.tts.enabledLanguages,
+      enabledLanguages: this.mapToTargetLanguages(this.config.targetLanguages),
       ttsMode: this.config.tts.mode,
       audioQuality: this.config.tts.mode === 'neural' ? 'high' : 'medium'
     };

@@ -34,7 +34,7 @@ Creates a new translation session.
   "sessionId": "CHURCH-2025-001",
   "config": {
     "sessionId": "CHURCH-2025-001",
-    "enabledLanguages": ["en", "es", "fr", "de", "it"],
+    "targetLanguages": ["en", "es", "fr", "de", "it"],
     "ttsMode": "neural" | "standard" | "local" | "disabled",
     "audioQuality": "high" | "medium" | "low"
   }
@@ -52,7 +52,7 @@ Updates session configuration during active session.
   "sessionId": "CHURCH-2025-001",
   "config": {
     "sessionId": "CHURCH-2025-001",
-    "enabledLanguages": ["en", "es"],
+    "targetLanguages": ["en", "es"],
     "ttsMode": "standard",
     "audioQuality": "medium"
   }
@@ -145,7 +145,7 @@ Confirms client joined session with metadata.
   "type": "session-metadata",
   "config": {
     "sessionId": "CHURCH-2025-001",
-    "enabledLanguages": ["en", "es", "fr"],
+    "targetLanguages": ["en", "es", "fr"],
     "ttsMode": "neural",
     "audioQuality": "high"
   },

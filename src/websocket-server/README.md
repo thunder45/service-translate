@@ -98,7 +98,7 @@ AWS_JWT_TOKEN=eyJxxx...
 {
   sessionId: string;
   config: {
-    enabledLanguages: string[];
+    targetLanguages: string[];
     ttsMode: 'neural' | 'standard' | 'local' | 'disabled';
     audioQuality: 'high' | 'medium' | 'low';
   }

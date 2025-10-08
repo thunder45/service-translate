@@ -1,6 +1,6 @@
 # Service Translate - Local Direct Streaming Architecture
 
-**Production-ready local application for real-time Portuguese-to-multilingual audio translation.**
+**Production-ready local application for real-time multilingual audio translation.**
 
 ## Project Structure
 
@@ -32,8 +32,8 @@ src/
 ### Local Audio Processing Pipeline
 - **Comprehensive audio device support** - All macOS input devices including Bluetooth
 - **Real-time VU meter** - 20-bar audio level visualization with gradient colors
-- **Direct AWS Transcribe Streaming** - Real-time Portuguese transcription
-- **Direct AWS Translate** - Multi-language translation (EN, ES, FR, DE, IT)
+- **Direct AWS Transcribe Streaming** - Real-time transcription (configurable source language)
+- **Direct AWS Translate** - Multi-language translation (configurable target languages)
 - **Local display** - Clean tabbed interface for translations
 
 ### Production-Ready Local Architecture

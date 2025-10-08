@@ -18,8 +18,8 @@ src/shared/
 
 ### Core Types
 - **ConnectionType**: `'admin' | 'client'` - User connection types
-- **SourceLanguage**: `'pt'` - Portuguese source language
-- **TargetLanguage**: `'en' | 'fr' | 'es' | 'de' | 'it'` - Supported translation languages
+- **SourceLanguage**: `'pt' | 'en' | 'es' | 'fr' | 'de' | 'it'` - Supported source languages
+- **TargetLanguage**: `'en' | 'fr' | 'es' | 'de' | 'it' | 'pt'` - Supported translation languages
 - **AudioEncoding**: `'pcm' | 'opus' | 'flac'` - Audio format options
 - **SessionStatus**: Session state management types
 - **MessageType**: Event and message categorization

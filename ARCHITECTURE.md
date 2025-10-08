@@ -116,7 +116,7 @@ Local App → Cognito User Pool → JWT Token → Identity Pool → AWS Credenti
 ```
 Selected Audio Device → sox → DirectTranscribeClient → AWS Transcribe Streaming
                                                     ↓
-Portuguese Text ← Real-time Results ←──────────────┘
+Source Language Text ← Real-time Results ←──────────────┘
               ↓
 TranslationService → AWS Translate → Multi-language Translations
                                   ↓
@@ -216,9 +216,8 @@ const encrypted = safeStorage.encryptString(JSON.stringify(credentials));
 ## 🔄 Future Enhancements
 
 ### **Planned Features**
-1. **Additional Languages**: Expand source language support beyond Portuguese
-2. **Custom Terminology**: Domain-specific translation improvements
-3. **Recording Capability**: Optional session recording for review
+1. **Custom Terminology**: Domain-specific translation improvements
+2. **Recording Capability**: Optional session recording for review
 4. **Batch Processing**: Process pre-recorded audio files
 
 ### **Technical Improvements**

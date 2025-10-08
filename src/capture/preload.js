@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // TTS and WebSocket
   connectWebSocket: () => ipcRenderer.invoke('connect-websocket'),
+  disconnectWebSocket: () => ipcRenderer.invoke('disconnect-websocket'),
   createSession: (sessionId) => ipcRenderer.invoke('create-session', sessionId),
   endSession: () => ipcRenderer.invoke('end-session'),
   updateTTSConfig: (config) => ipcRenderer.invoke('update-tts-config', config),

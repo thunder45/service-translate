@@ -1,6 +1,6 @@
 # Service Translate - Real-Time Audio Translation with TTS
 
-**Multi-platform application for real-time Portuguese-to-multilingual audio translation with Text-to-Speech capabilities.**
+**Multi-platform application for real-time multilingual audio translation with Text-to-Speech capabilities.**
 
 ## 🎯 What This Is
 
@@ -173,8 +173,8 @@ npm start
 
 ### Translation Pipeline
 1. **Audio Capture**: Real microphone input via sox (macOS) or native (Windows)
-2. **AWS Transcribe Streaming**: Real-time Portuguese speech-to-text
-3. **AWS Translate**: Multi-language translation (EN, ES, FR, DE, IT)
+2. **AWS Transcribe Streaming**: Real-time speech-to-text (configurable source language)
+3. **AWS Translate**: Multi-language translation (configurable target languages)
 4. **Holyrics Display**: Optional display on church screens
 5. **TTS Server**: Sends translations to TTS Server for processing
 
@@ -239,7 +239,7 @@ npm start
 ### ✅ **PRODUCTION READY**
 - **Complete TTS System**: Admin app, WebSocket server, and PWA client
 - **Cross-Platform**: Windows and macOS support with automated setup
-- **Real-Time Translation**: Portuguese to 5 languages with TTS playback
+- **Real-Time Translation**: Configurable source and target languages with TTS playback
 - **Session Management**: Simple session-based access for clients
 - **Cost Optimization**: Real-time cost tracking with configurable limits
 - **Church Integration**: Direct Holyrics API integration

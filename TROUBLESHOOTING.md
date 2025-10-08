@@ -17,16 +17,16 @@
 4. Speak into microphone - transcription should resume within 2-3 seconds
 
 ### Problem: Wrong language sent to Holyrics
-**Symptoms**: Portuguese text appears instead of configured language (FR, EN, etc.)
+**Symptoms**: Unexpected language appears instead of configured display language
 
 **Fixed in latest version**:
 - Language matching now supports both short codes (fr) and full codes (fr-FR)
-- Logs show: `[Holyrics] Selected translation: fr-FR: ...` instead of `FALLBACK TO PT`
+- Logs show: `[Holyrics] Selected translation: fr-FR: ...` instead of fallback
 
 **What to check**:
 1. Look for `[Holyrics] Configured language:` in logs
-2. Look for `[Holyrics] Available translations:` - should show all 5 languages
-3. Look for `[Holyrics] Selected translation:` - should NOT say "FALLBACK TO PT"
+2. Look for `[Holyrics] Available translations:` - should show all configured target languages
+3. Look for `[Holyrics] Selected translation:` - should match configured display language
 
 ### Problem: Test/Clear buttons not working
 **Symptoms**: Error "Streaming manager not initialized"
@@ -124,12 +124,12 @@
 ### Audio levels showing but no transcription
 **Causes**:
 1. Audio too quiet
-2. Wrong language (not Portuguese)
+2. Wrong language (not matching configured source language)
 3. AWS credentials expired
 
 **Solutions**:
 1. Speak louder or adjust microphone gain
-2. Verify speaking Portuguese
+2. Verify speaking in configured source language
 3. Logout and login again (refreshes credentials)
 
 ## AWS Issues
@@ -247,7 +247,7 @@ npm run dev
 1. **Check logs** - Look for error messages with ❌
 2. **Test components individually**:
    - Audio: Check VU meter
-   - Transcription: Speak Portuguese and watch for text
+   - Transcription: Speak in source language and watch for text
    - Translation: Check language tabs
    - Holyrics: Use test script
 3. **Verify configuration**:
@@ -265,7 +265,7 @@ npm run dev
 - [ ] Holyrics API Server is enabled
 - [ ] Service Translate shows "Streaming Active"
 - [ ] VU meter shows audio levels
-- [ ] Portuguese text appears in app
+- [ ] Source language text appears in app
 - [ ] Translations appear in language tabs
 - [ ] Holyrics logs show `✅ Success`
 - [ ] Text appears on Holyrics screen

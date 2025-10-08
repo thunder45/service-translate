@@ -271,9 +271,9 @@ The system provides a complete solution for real-time audio translation with TTS
 
 **Translation Flow**:
 1. Buffer audio chunks until threshold reached
-2. **Real-time transcribe audio to Portuguese text via AWS Transcribe Streaming**
+2. **Real-time transcribe audio to text via AWS Transcribe Streaming (configurable source language)**
 3. Apply custom terminology replacements
-4. Translate to all target languages via AWS Translate
+4. Translate to all target languages via AWS Translate (configurable target languages)
 5. Broadcast to clients with matching language preference
 
 ### 5. macOS Audio Capture Application ✅

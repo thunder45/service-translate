@@ -11,6 +11,9 @@ export interface AppConfig {
   identityPoolId: string;
   region: string;
   deviceId: string;
+  // Language settings
+  sourceLanguage: string;
+  targetLanguages: string[];
   // Audio settings
   inputDevice?: string;
   sampleRate?: number;
@@ -25,6 +28,12 @@ export interface AppConfig {
     token: string;
     language: string;
     maxLines: number;
+  };
+  // TTS settings
+  tts?: {
+    mode: 'neural' | 'standard' | 'local' | 'disabled';
+    host: string;
+    port: number;
   };
 }
 

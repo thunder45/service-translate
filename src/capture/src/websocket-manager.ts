@@ -415,18 +415,26 @@ export class WebSocketManager extends EventEmitter {
     if (!this.socket) return;
 
     this.socket.on('disconnect', (reason) => {
-      console.log('WebSocket disconnected:', reason);
+      console.log('=== WebSocket Disconnected ===');
+      console.log('Reason:', reason);
+      console.log('Was connected:', this.isConnected);
+      console.log('Current session:', this.currentSession?.sessionId || 'none');
       this.isConnected = false;
+      this.connectionHealth.connected = false;
       this.emit('disconnected', reason);
       
       // Attempt reconnection if not manually disconnected
       if (reason !== 'io client disconnect') {
+        console.log('Attempting automatic reconnection...');
         this.attemptReconnection();
+      } else {
+        console.log('Manual disconnect - not reconnecting');
       }
     });
 
     this.socket.on('error', (error) => {
-      console.error('WebSocket error:', error);
+      console.error('=== WebSocket Error ===');
+      console.error('Error:', error);
       this.emit('error', error);
     });
 

@@ -41,8 +41,8 @@ The TTS Server (formerly WebSocket Server) now handles AWS Polly TTS generation,
 ### 1. Capture App (Simplified)
 **Responsibilities:**
 - Audio capture from microphone
-- AWS Transcribe streaming (Portuguese → Text)
-- AWS Translate (Portuguese → 5 languages)
+- AWS Transcribe streaming (configurable source language → Text)
+- AWS Translate (source language → configurable target languages)
 - Send translations to Holyrics (optional)
 - Send translations to TTS Server
 

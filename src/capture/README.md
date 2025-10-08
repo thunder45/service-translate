@@ -5,8 +5,8 @@ Cross-platform Electron application for real-time audio capture, transcription, 
 ## Features
 
 - **Audio Capture**: Real-time microphone input with device selection
-- **AWS Transcribe**: Streaming Portuguese speech-to-text
-- **AWS Translate**: Multi-language translation (EN, ES, FR, DE, IT)
+- **AWS Transcribe**: Streaming speech-to-text (configurable source language)
+- **AWS Translate**: Multi-language translation (configurable target languages)
 - **Holyrics Integration**: Optional display on church screens
 - **WebSocket Client**: Sends translations to TTS Server
 - **Cost Tracking**: Real-time monitoring of AWS service costs
@@ -39,21 +39,31 @@ npm start
 ### AWS Credentials
 Configure in the app UI:
 1. Click "Settings"
-2. Enter AWS credentials:
-   - Region
-   - User Pool ID
-   - Identity Pool ID
-   - Username/Password
+2. Configure tabs:
+   - **Languages**: Select source language and target languages
+   - **Audio**: Configure input device and audio settings
+   - **TTS**: Set TTS mode and WebSocket server URL
+   - **Holyrics**: Optional church display integration
+   - **Advanced**: AWS credentials (Region, User Pool ID, Identity Pool ID)
 3. Click "Save"
+4. Login with Username/Password
 
 ### TTS Server
 ```typescript
 {
   tts: {
     mode: 'neural',              // 'neural' | 'standard' | 'local' | 'disabled'
-    websocketUrl: 'ws://localhost:3001',
-    sessionId: 'CHURCH-2025-001'
+    host: 'localhost',           // TTS server host
+    port: 3001                   // TTS server port
   }
+}
+```
+
+### Language Configuration
+```typescript
+{
+  sourceLanguage: 'pt',          // Source language code
+  targetLanguages: ['en', 'es', 'fr', 'de', 'it']  // Target language codes
 }
 ```
 
@@ -93,7 +103,7 @@ npm start
 ### 5. Start Streaming
 - Select microphone
 - Click "Start"
-- Speak in Portuguese
+- Speak in configured source language
 - Translations sent to TTS Server
 
 ## Features
@@ -106,7 +116,7 @@ npm start
 
 ### Transcription
 - Real-time streaming
-- Portuguese language
+- Configurable source language
 - Partial and final results
 - Automatic timeout handling
 

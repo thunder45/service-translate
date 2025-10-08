@@ -13,7 +13,7 @@ Service Translate has been **fully implemented** as a comprehensive real-time au
 
 #### 1. **Admin Application** - Cross-Platform Electron App ✅
 - **Platforms**: Windows 10/11 and macOS 10.15+ with automated setup scripts
-- **Audio Capture**: Real-time Portuguese audio with device selection and VU meter
+- **Audio Capture**: Real-time audio with configurable source language, device selection and VU meter
 - **AWS Integration**: Direct streaming to Transcribe, Translate, and Polly services
 - **TTS Management**: AWS Polly Neural/Standard voices with real-time cost tracking
 - **WebSocket Client**: Session creation and real-time translation broadcasting
@@ -101,7 +101,7 @@ npm run start:capture   # Admin Electron application
 #### 5. **Usage Workflow**
 1. **Admin**: Configure AWS credentials and create session
 2. **Clients**: Join using session ID on any device with browser
-3. **Translation**: Real-time Portuguese → 5 languages with TTS
+3. **Translation**: Real-time multilingual translation with configurable source and target languages
 4. **Holyrics**: Optional integration for church presentation displays
 
 ## 💰 **Cost Analysis - Production Ready**
@@ -230,7 +230,7 @@ npm run security:audit
 
 Service Translate is a **complete, production-ready system** that successfully delivers:
 
-1. **Real-time audio translation** from Portuguese to 5 languages
+1. **Real-time audio translation** with configurable source and target languages
 2. **Text-to-Speech capabilities** with hybrid cloud/local options
 3. **Multi-client support** for congregation members via PWA
 4. **Cost-effective operation** with real-time cost tracking

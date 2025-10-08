@@ -35,9 +35,9 @@ Your Service Translate app now integrates directly with Holyrics to display real
 
 When you start streaming:
 
-1. **Portuguese audio** is captured from your microphone
+1. **Audio** is captured from your microphone in configured source language
 2. **Real-time transcription** converts speech to text (AWS Transcribe)
-3. **Translation** happens to 5 languages: EN, ES, FR, DE, IT (AWS Translate)
+3. **Translation** happens to configured target languages (AWS Translate)
 4. **Selected language** is automatically sent to Holyrics via SetTextCP API
 5. **Big screen displays** the translation in real-time with rolling text (last 3 sentences)
 6. **Individual devices** can still view other languages via the app
@@ -54,9 +54,9 @@ When you start streaming:
 1. **Login** to Service Translate
 2. **Select your audio device** in Configuration → Audio
 3. **Click "🎤 Start Local Streaming"**
-4. **Speak Portuguese** - translations appear on:
+4. **Speak in source language** - translations appear on:
    - ✅ **Big screen** (via Holyrics - selected language only)
-   - ✅ **Individual devices** (via the app - all 5 languages)
+   - ✅ **Individual devices** (via the app - all configured target languages)
 
 ### Manual Controls
 
@@ -91,7 +91,7 @@ When you start streaming:
 ### Audio Issues
 - ✅ **Check microphone**: Verify audio device selection
 - ✅ **Check VU meter**: Ensure audio levels are showing
-- ✅ **Check transcription**: Verify Portuguese transcription is working
+- ✅ **Check transcription**: Verify source language transcription is working
 
 ## Example Configuration
 
@@ -101,7 +101,7 @@ Holyrics Settings:
 📍 Holyrics Host: 192.168.1.100
 🔌 Holyrics Port: 8080
 🔑 API Token: abc123def456
-🌍 Display Language: Portuguese (Original)
+🌍 Display Language: pt (Source Language)
 📄 Max Lines on Screen: 3
 ```
 

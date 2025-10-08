@@ -3,11 +3,38 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { CognitoAuth } from './auth';
 import { DirectStreamingManager } from './direct-streaming-manager';
+import { WebSocketManager } from './websocket-manager';
 import { loadConfig, saveConfig } from './config';
 
 let mainWindow: BrowserWindow | null = null;
 let cognitoAuth: CognitoAuth | null = null;
 let streamingManager: DirectStreamingManager | null = null;
+let webSocketManager: WebSocketManager | null = null;
+
+interface ServerConfig {
+  host: string;
+  port: number;
+}
+
+function getServerConfig(config: any): ServerConfig {
+  let host = 'localhost';
+  let port = 3001;
+  
+  if (config?.tts) {
+    if (config.tts.host && config.tts.port) {
+      host = config.tts.host;
+      port = config.tts.port;
+    } else if (config.tts.websocketUrl) {
+      const match = config.tts.websocketUrl.match(/ws:\/\/([^:]+):(\d+)/);
+      if (match) {
+        host = match[1];
+        port = parseInt(match[2]);
+      }
+    }
+  }
+  
+  return { host, port };
+}
 
 interface StoredCredentials {
   username: string;
@@ -253,15 +280,59 @@ ipcMain.handle('change-password', async (_, credentials) => {
 
 // TTS and WebSocket handlers
 ipcMain.handle('connect-websocket', async () => {
-  if (streamingManager) {
+  try {
+    const config = loadConfig();
+    const { host, port } = getServerConfig(config);
+    
+    console.log(`Using host: ${host}, port: ${port}`);
+    
+    // Initialize WebSocketManager if not already created
+    if (!webSocketManager) {
+      const serverUrl = `ws://${host}:${port}`;
+      console.log('Creating WebSocketManager with URL:', serverUrl);
+      webSocketManager = new WebSocketManager({
+        serverUrl,
+        reconnectAttempts: 5,
+        reconnectDelay: 1000
+      });
+      
+      // Setup event listeners for UI updates
+      webSocketManager.on('connected', () => {
+        console.log('WebSocketManager: connected event');
+        mainWindow?.webContents.send('websocket-connected');
+      });
+      
+      webSocketManager.on('disconnected', (reason) => {
+        console.log('WebSocketManager: disconnected event, reason:', reason);
+        mainWindow?.webContents.send('websocket-disconnected');
+      });
+      
+      webSocketManager.on('error', (error) => {
+        console.log('WebSocketManager: error event:', error);
+      });
+    } else {
+      console.log('WebSocketManager already exists, reusing');
+    }
+    
+    await webSocketManager.connect();
+    console.log('WebSocket connected successfully');
+    return { success: true };
+  } catch (error: any) {
+    console.error('WebSocket connection error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('disconnect-websocket', async () => {
+  if (webSocketManager) {
     try {
-      await streamingManager.connectWebSocket();
+      webSocketManager.disconnect();
       return { success: true };
     } catch (error: any) {
       return { success: false, error: error.message };
     }
   }
-  return { success: false, error: 'Streaming manager not initialized' };
+  return { success: false, error: 'WebSocket manager not initialized' };
 });
 
 ipcMain.handle('create-session', async (_, sessionId) => {
@@ -329,18 +400,17 @@ ipcMain.handle('start-local-streaming', async (_, options = {}) => {
     identityPoolId: config.identityPoolId,
     userPoolId: config.userPoolId,
     jwtToken: token,
-    languageCode: 'pt-BR',
-    sourceLanguage: 'pt-BR',
-    targetLanguages: ['en-US', 'es-ES', 'fr-FR', 'de-DE', 'it-IT'],
+    sourceLanguage: config.sourceLanguage || 'pt',
+    targetLanguages: config.targetLanguages || ['en', 'es', 'fr', 'de', 'it'],
     sampleRate: config.sampleRate || 16000,
     audioDevice: options.audioDevice || 'default',
     holyrics: config.holyrics,
     tts: config.tts || {
       mode: 'neural',
-      enabledLanguages: ['en-US', 'es-ES', 'fr-FR', 'de-DE', 'it-IT'],
-      websocketUrl: 'ws://localhost:3001'
+      host: 'localhost',
+      port: 3001
     },
-  });
+  }, webSocketManager);
 
   // Setup event handlers for local display
   streamingManager.on('transcription', (result) => {
@@ -404,6 +474,8 @@ ipcMain.handle('start-websocket-server', async () => {
   try {
     const { exec } = require('child_process');
     const path = require('path');
+    const config = loadConfig();
+    const { port } = getServerConfig(config);
     
     // Get the websocket server path
     const serverPath = path.join(__dirname, '../../websocket-server');
@@ -419,7 +491,7 @@ ipcMain.handle('start-websocket-server', async () => {
       
       serverProcess.stdout.on('data', (data) => {
         console.log('WebSocket Server:', data);
-        if ((data.includes('listening on port') || data.includes('Server running')) && !hasResolved) {
+        if ((data.includes('running on port') || data.includes('Server running')) && !hasResolved) {
           hasResolved = true;
           resolve({ success: true, message: 'Server started successfully' });
         }
@@ -429,7 +501,7 @@ ipcMain.handle('start-websocket-server', async () => {
         console.error('WebSocket Server Error:', data);
         if (data.includes('EADDRINUSE') && !hasResolved) {
           hasResolved = true;
-          resolve({ success: true, message: 'Server already running on port 3001' });
+          resolve({ success: true, message: `Server already running on port ${port}` });
         } else if (!hasResolved) {
           hasResolved = true;
           reject(new Error(data.toString()));
@@ -452,14 +524,20 @@ ipcMain.handle('start-websocket-server', async () => {
 ipcMain.handle('stop-websocket-server', async () => {
   try {
     const { exec } = require('child_process');
+    const config = loadConfig();
+    const { port } = getServerConfig(config);
+    
+    console.log(`Stopping WebSocket server on port ${port}...`);
     
     return new Promise((resolve) => {
-      // Kill any process running on port 3001
-      exec('lsof -ti:3001 | xargs kill -9', (error, stdout, stderr) => {
+      // Kill only LISTEN processes on the specified port
+      exec(`lsof -ti:${port} -sTCP:LISTEN | xargs kill -9`, (error, stdout, stderr) => {
         if (error) {
           // Process might not be running, which is fine
+          console.log('No server process found on port', port);
           resolve({ success: true, message: 'Server stopped (was not running)' });
         } else {
+          console.log('Server process killed on port', port);
           resolve({ success: true, message: 'Server stopped successfully' });
         }
       });
