@@ -42,6 +42,9 @@ export class MessageRouter {
         case 'start-session':
           this.handleStartSession(socket, data);
           break;
+        case 'end-session':
+          this.handleEndSession(socket, data);
+          break;
         case 'join-session':
           this.handleJoinSession(socket, data);
           break;
@@ -101,6 +104,54 @@ export class MessageRouter {
       console.log(`Session started: ${sessionId} by admin ${socket.id}`);
     } catch (error) {
       this.sendError(socket, 400, error instanceof Error ? error.message : 'Failed to start session', { sessionId });
+    }
+  }
+
+  /**
+   * Handle session end (admin only)
+   */
+  private handleEndSession(socket: Socket, data: any): void {
+    const { sessionId } = data;
+    
+    if (!sessionId) {
+      this.sendError(socket, 400, 'sessionId is required');
+      return;
+    }
+
+    const session = this.sessionManager.getSession(sessionId);
+    if (!session) {
+      this.sendError(socket, 404, 'Session not found', { sessionId });
+      return;
+    }
+
+    // Verify admin
+    if (session.adminSocketId !== socket.id) {
+      this.sendError(socket, 403, 'Only session admin can end the session', { sessionId });
+      return;
+    }
+
+    const success = this.sessionManager.endSession(sessionId);
+    
+    if (success) {
+      // Notify all clients
+      this.io.to(sessionId).emit('session-ended', {
+        type: 'session-ended',
+        sessionId,
+        timestamp: new Date().toISOString()
+      });
+      
+      // Disconnect all clients from room
+      this.io.in(sessionId).socketsLeave(sessionId);
+      
+      socket.emit('session-ended', {
+        type: 'session-ended',
+        sessionId,
+        timestamp: new Date().toISOString()
+      });
+      
+      console.log(`Session ended: ${sessionId} by admin ${socket.id}`);
+    } else {
+      this.sendError(socket, 500, 'Failed to end session', { sessionId });
     }
   }
 

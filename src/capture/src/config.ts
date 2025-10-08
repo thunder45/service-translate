@@ -40,14 +40,13 @@ export interface AppConfig {
 export function validateConfig(config: AppConfig): string[] {
   const errors: string[] = [];
   
+  // Critical fields only
   if (!config.userPoolId) errors.push('userPoolId is required');
   if (!config.clientId) errors.push('clientId is required');
   if (!config.identityPoolId) errors.push('identityPoolId is required');
   if (!config.region) errors.push('region is required');
-  if (!config.sourceLanguage) errors.push('sourceLanguage is required');
-  if (!config.targetLanguages?.length) errors.push('At least one target language is required');
-  if (!config.tts?.host) errors.push('TTS host is required');
-  if (!config.tts?.port) errors.push('TTS port is required');
+  
+  // Optional fields with defaults - only warn if invalid values provided
   if (config.tts?.port && (config.tts.port < 1 || config.tts.port > 65535)) {
     errors.push('TTS port must be between 1 and 65535');
   }

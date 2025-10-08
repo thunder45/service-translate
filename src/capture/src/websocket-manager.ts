@@ -261,8 +261,7 @@ export class WebSocketManager extends EventEmitter {
       return;
     }
 
-    this.socket.emit('admin-message', {
-      type: 'end-session',
+    this.socket.emit('end-session', {
       sessionId: this.currentSession.sessionId
     });
 

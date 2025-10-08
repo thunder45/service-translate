@@ -43,6 +43,18 @@ Creates a new translation session.
 
 **Response:** `session-started`
 
+### End Session
+Ends an active translation session (admin only).
+
+```json
+{
+  "type": "end-session",
+  "sessionId": "CHURCH-2025-001"
+}
+```
+
+**Response:** `session-ended` (broadcast to all clients in session)
+
 ### Config Update
 Updates session configuration during active session.
 
@@ -109,6 +121,19 @@ Client leaves the session.
 ```
 
 **Response:** `session-left`
+
+### Session Ended
+Broadcast to all clients when admin ends the session.
+
+```json
+{
+  "type": "session-ended",
+  "sessionId": "CHURCH-2025-001",
+  "timestamp": "2025-01-08T19:00:00.000Z"
+}
+```
+
+**Client Action:** Disconnect from session, show "Session ended" message
 
 ### Change Language
 Client changes preferred language.
