@@ -269,6 +269,11 @@ io.on('connection', (socket) => {
     messageRouter.routeMessage(socket, 'end-session', data);
   }));
   
+  socket.on('list-sessions', secureMessageHandler('list-sessions', () => {
+    console.log(`[${socket.id}] ← list-sessions`);
+    messageRouter.routeMessage(socket, 'list-sessions', {});
+  }));
+  
   socket.on('join-session', secureMessageHandler('join-session', (data) => {
     console.log(`[${socket.id}] ← join-session:`, JSON.stringify(data, null, 2));
     // Validate session join

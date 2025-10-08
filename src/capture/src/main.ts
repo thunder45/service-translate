@@ -396,6 +396,18 @@ ipcMain.handle('end-session', async () => {
   return { success: false, error: 'Streaming manager not initialized' };
 });
 
+ipcMain.handle('list-sessions', async () => {
+  if (webSocketManager) {
+    try {
+      const sessions = await webSocketManager.listSessions();
+      return { success: true, sessions };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+  return { success: false, error: 'WebSocket manager not initialized' };
+});
+
 ipcMain.handle('update-tts-config', async (_, config) => {
   if (streamingManager) {
     try {

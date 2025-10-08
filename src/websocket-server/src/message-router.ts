@@ -45,6 +45,9 @@ export class MessageRouter {
         case 'end-session':
           this.handleEndSession(socket, data);
           break;
+        case 'list-sessions':
+          this.handleListSessions(socket);
+          break;
         case 'join-session':
           this.handleJoinSession(socket, data);
           break;
@@ -153,6 +156,35 @@ export class MessageRouter {
     } else {
       this.sendError(socket, 500, 'Failed to end session', { sessionId });
     }
+  }
+
+  /**
+   * Handle list sessions request
+   */
+  private handleListSessions(socket: Socket): void {
+    const sessions = this.sessionManager.getAllSessions();
+    
+    const sessionsList = sessions.map(session => ({
+      sessionId: session.sessionId,
+      status: session.status,
+      clientCount: session.clients.size,
+      createdAt: session.createdAt.toISOString(),
+      lastActivity: session.lastActivity.toISOString(),
+      isAdmin: session.adminSocketId === socket.id,
+      config: {
+        enabledLanguages: session.config.enabledLanguages,
+        ttsMode: session.config.ttsMode,
+        audioQuality: session.config.audioQuality
+      }
+    }));
+    
+    socket.emit('sessions-list', {
+      type: 'sessions-list',
+      sessions: sessionsList,
+      timestamp: new Date().toISOString()
+    });
+    
+    console.log(`Listed ${sessionsList.length} sessions for ${socket.id}`);
   }
 
   /**

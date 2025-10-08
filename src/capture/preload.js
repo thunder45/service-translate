@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   disconnectWebSocket: () => ipcRenderer.invoke('disconnect-websocket'),
   createSession: (sessionId) => ipcRenderer.invoke('create-session', sessionId),
   endSession: () => ipcRenderer.invoke('end-session'),
+  listSessions: () => ipcRenderer.invoke('list-sessions'),
   updateTTSConfig: (config) => ipcRenderer.invoke('update-tts-config', config),
   getCurrentCosts: () => ipcRenderer.invoke('get-current-costs'),
   resetCostTracking: () => ipcRenderer.invoke('reset-cost-tracking'),

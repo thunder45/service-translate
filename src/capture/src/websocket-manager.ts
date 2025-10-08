@@ -332,6 +332,25 @@ export class WebSocketManager extends EventEmitter {
     this.emit('session-ended');
   }
 
+  async listSessions(): Promise<any[]> {
+    if (!this.isConnected || !this.socket) {
+      throw new Error('Not connected to WebSocket server');
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('List sessions timeout'));
+      }, 5000);
+
+      this.socket!.once('sessions-list', (data: any) => {
+        clearTimeout(timeout);
+        resolve(data.sessions || []);
+      });
+
+      this.socket!.emit('list-sessions');
+    });
+  }
+
   /**
    * Get current session configuration
    */
