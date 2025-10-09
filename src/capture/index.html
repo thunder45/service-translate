@@ -350,7 +350,7 @@
                         <label>Source Language:</label>
                         <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 5px;">
                             <label style="display: flex; align-items: center; gap: 5px;">
-                                <input type="radio" name="sourceLanguage" value="pt" checked> 🇧🇷 Portuguese
+                                <input type="radio" name="sourceLanguage" value="pt-BR" checked> 🇧🇷 Portuguese
                             </label>
                             <label style="display: flex; align-items: center; gap: 5px;">
                                 <input type="radio" name="sourceLanguage" value="en"> 🇺🇸 English
@@ -640,7 +640,7 @@
             <div class="streaming-controls">
                 <div style="display: flex; align-items: center; justify-content: center; gap: 20px;">
                     <div>
-                        <button class="start-btn" onclick="startStreaming()" id="start-btn">
+                        <button class="start-btn" onclick="startStreaming()" id="start-btn" disabled title="Create a session first">
                             🎤 Start Streaming
                         </button>
                         <button class="stop-btn hidden" onclick="stopStreaming()" id="stop-btn" style="display: none;">
@@ -1236,6 +1236,12 @@
                     document.getElementById('current-session-id').textContent = sessionId;
                     document.getElementById('create-session-btn').classList.add('hidden');
                     document.getElementById('end-session-btn').classList.remove('hidden');
+                    
+                    // Enable Start Streaming button
+                    const startBtn = document.getElementById('start-btn');
+                    startBtn.disabled = false;
+                    startBtn.title = '';
+                    
                     showStatus(`Reconnected to session ${sessionId}`, 'success');
                     await refreshSessions();
                 } else {
@@ -1288,11 +1294,41 @@
                 document.getElementById('end-session-btn').classList.remove('hidden');
                 document.getElementById('session-panel').classList.remove('hidden');
                 
+                // Enable Start Streaming button
+                const startBtn = document.getElementById('start-btn');
+                startBtn.disabled = false;
+                startBtn.title = '';
+                
                 showStatus(`Session ${sessionId} created successfully`, 'success');
                 await refreshSessions();
             } catch (error) {
                 console.error('Failed to create session:', error);
                 showStatus(`Failed to create session: ${error.message}`, 'error');
+            }
+        }
+        
+        async function endCurrentSession() {
+            try {
+                const result = await window.electronAPI.endSession();
+                
+                if (result.success) {
+                    document.getElementById('current-session-id').textContent = 'Not Connected';
+                    document.getElementById('create-session-btn').classList.remove('hidden');
+                    document.getElementById('end-session-btn').classList.add('hidden');
+                    
+                    // Disable Start Streaming button
+                    const startBtn = document.getElementById('start-btn');
+                    startBtn.disabled = true;
+                    startBtn.title = 'Create a session first';
+                    
+                    showStatus('Session ended', 'success');
+                    await refreshSessions();
+                } else {
+                    showStatus(`Failed to end session: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                console.error('Failed to end session:', error);
+                showStatus(`Failed to end session: ${error.message}`, 'error');
             }
         }
         

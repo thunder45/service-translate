@@ -9,16 +9,33 @@ Cross-platform Electron application for real-time audio capture, transcription, 
 - **AWS Translate**: Multi-language translation (configurable target languages)
 - **Holyrics Integration**: Optional display on church screens
 - **WebSocket Client**: Sends translations to TTS Server
+- **Session Management**: Independent session lifecycle control
 - **Cost Tracking**: Real-time monitoring of AWS service costs
 - **Cross-Platform**: Windows 10/11 and macOS 10.15+
 
 ## Architecture
 
+### Separation of Concerns
+
+**Streaming** and **Session Management** are completely independent:
+
 ```
-Microphone → Audio Capture → Transcribe → Translate → [Holyrics]
+Streaming Layer (Audio Processing):
+Microphone → Audio Capture → Transcribe → Translate → Local Display
                                                       ↓
-                                                  TTS Server
+                                                  [Holyrics]
+
+Session Layer (Broadcasting):
+WebSocket Manager → TTS Server → Connected Clients
 ```
+
+**Valid State Combinations:**
+- ❌ No Streaming + ❌ No Session: Initial state
+- ❌ No Streaming + ✅ Session Active: Session ready, waiting to stream
+- ✅ Streaming + ❌ No Session: Local-only transcription/translation
+- ✅ Streaming + ✅ Session Active: Full operation with client broadcasting
+
+See [SESSION_STREAMING_SEPARATION.md](../../SESSION_STREAMING_SEPARATION.md) for details.
 
 ## Quick Start
 

@@ -4,6 +4,21 @@
 
 Service Translate uses a **local network TTS architecture** that combines real-time audio translation with Text-to-Speech capabilities, serving multiple clients through a local WebSocket server while maintaining cost efficiency.
 
+### 🎯 Core Design Principle: Separation of Concerns
+
+**Streaming** (Audio Capture) and **Session Management** (Broadcasting) are **completely independent**:
+
+- **Streaming**: Audio capture → Transcription → Translation → Local display
+- **Session Management**: WebSocket session lifecycle for client broadcasting
+
+**Valid State Combinations:**
+- ❌ No Streaming + ❌ No Session: Initial state
+- ❌ No Streaming + ✅ Session Active: Session ready, waiting to stream
+- ✅ Streaming + ❌ No Session: Local-only transcription/translation
+- ✅ Streaming + ✅ Session Active: Full operation with client broadcasting
+
+**See [SESSION_STREAMING_SEPARATION.md](SESSION_STREAMING_SEPARATION.md) for detailed architecture.**
+
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    Admin Machine                        │

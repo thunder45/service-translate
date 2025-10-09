@@ -1,11 +1,26 @@
 # Service Translate - Current Implementation Status
 
-**Date**: October 6, 2025  
+**Date**: October 8, 2025  
 **Status**: ✅ **PRODUCTION READY** - Complete TTS System Implementation
 
 ## 🎯 Executive Summary
 
 Service Translate has been **fully implemented** as a comprehensive real-time audio translation system with Text-to-Speech capabilities. The system successfully delivers on all original requirements and is ready for production deployment.
+
+### 🏗️ **Architecture Highlights**
+
+**Separation of Concerns:**
+- **Streaming** (Audio Capture) and **Session Management** (Broadcasting) are completely independent
+- Start/stop streaming without affecting session state
+- Create/end sessions without affecting streaming
+- Manual session selection from active sessions list (no auto-reconnect)
+- See [SESSION_STREAMING_SEPARATION.md](SESSION_STREAMING_SEPARATION.md) for detailed architecture
+
+**Valid State Combinations:**
+- ❌ No Streaming + ❌ No Session: Initial state
+- ❌ No Streaming + ✅ Session Active: Session ready, waiting to stream
+- ✅ Streaming + ❌ No Session: Local-only transcription/translation
+- ✅ Streaming + ✅ Session Active: Full operation with client broadcasting
 
 ## ✅ **IMPLEMENTATION COMPLETE**
 
@@ -22,7 +37,7 @@ Service Translate has been **fully implemented** as a comprehensive real-time au
 
 #### 2. **WebSocket Server** - Local Node.js Server ✅
 - **Technology**: Node.js with Socket.IO for real-time communication
-- **Session Management**: Human-readable session IDs (e.g., "CHURCH-2025-001")
+- **Session Management**: Human-readable session IDs with manual selection from active sessions list
 - **Client Broadcasting**: Real-time text and audio delivery to 50+ concurrent clients
 - **Security Middleware**: Authentication, rate limiting, and session validation
 - **Audio Management**: Local file storage and HTTP serving for Polly-generated audio

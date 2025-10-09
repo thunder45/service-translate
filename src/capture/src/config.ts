@@ -34,7 +34,6 @@ export interface AppConfig {
     mode: 'neural' | 'standard' | 'local' | 'disabled';
     host: string;
     port: number;
-    activeSessionId?: string; // Current active session
   };
 }
 

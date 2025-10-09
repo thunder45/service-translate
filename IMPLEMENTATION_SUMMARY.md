@@ -384,6 +384,11 @@ npm run deploy
 2. **Short-term**: Add comprehensive testing suite
 3. **Medium-term**: Add monitoring, analytics, and optimization
 4. **Long-term**: Mobile apps and advanced features
+5. **Future**: Make websocket server connections authenticated for admin primitives
+6. **Future**: Refresh session list for admin UI whenever the webserver connectiong moves to connected state
+7. **Future**: Add support for male speakers in TTS
+8. **Future**: The button Reconnect should call the join session primitive as Admin. The webserver should recognize the diffences of an admin joining a session, vs a client joining a session.
+9. **Future**: Reduce the retry on WebSocket connection error to only 2 times
 
 ## Notes
 

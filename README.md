@@ -55,6 +55,21 @@ A comprehensive real-time translation system that includes:
 - **Real-time Broadcasting**: Instant text and audio delivery to all connected clients
 - **Cost Effective**: Under $3/hour for typical church service
 
+### 🎯 Architecture Principles
+
+**Separation of Concerns:**
+- **Streaming** (Audio Capture) and **Session Management** (Broadcasting) are completely independent
+- Start/stop streaming without affecting session state
+- Create/end sessions without affecting streaming
+- Manual session selection from active sessions list (no auto-reconnect)
+- See [SESSION_STREAMING_SEPARATION.md](SESSION_STREAMING_SEPARATION.md) for detailed architecture
+
+**Valid State Combinations:**
+- ❌ No Streaming + ❌ No Session: Initial state
+- ❌ No Streaming + ✅ Session Active: Session ready, waiting to stream
+- ✅ Streaming + ❌ No Session: Local-only transcription/translation
+- ✅ Streaming + ✅ Session Active: Full operation with client broadcasting
+
 ## 🛠️ Technology Stack
 
 ### Admin Application
