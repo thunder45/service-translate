@@ -1110,7 +1110,7 @@
             } catch (error) {
                 showStatus(`Failed to start streaming: ${error.message}`, 'error');
                 startBtn.disabled = false;
-                startBtn.textContent = '🎤 Start Local Streaming';
+                startBtn.textContent = '🎤 Start Streaming';
             }
         }
 
@@ -1125,7 +1125,7 @@
                 stopBtn.style.display = 'none';
                 startBtn.style.display = 'inline-block';
                 startBtn.disabled = false;
-                startBtn.textContent = '🎤 Start Local Streaming';
+                startBtn.textContent = '🎤 Start Streaming';
                 document.getElementById('vu-meter').classList.add('hidden');
                 
                 showStatus('Streaming stopped', 'info');

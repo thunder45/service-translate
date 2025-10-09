@@ -98,7 +98,7 @@ export class WebSocketManager extends EventEmitter {
         this.socket = io(this.config.serverUrl, {
           transports: ['websocket'],
           timeout: 10000,
-          reconnection: false, // We handle reconnection manually
+          reconnection: false // We handle reconnection manually
         });
 
         this.setupEventHandlers();
@@ -166,13 +166,11 @@ export class WebSocketManager extends EventEmitter {
       throw new Error('Not connected to WebSocket server');
     }
 
-    const message: StartSessionMessage = {
+    this.socket.emit('start-session', {
       type: 'start-session',
       sessionId,
       config
-    };
-
-    this.socket.emit('admin-message', message);
+    });
     this.currentSession = config;
     this.sessionStateBackup = { ...config }; // Backup for recovery
     this.emit('session-created', sessionId, config);

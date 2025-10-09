@@ -371,7 +371,7 @@ ipcMain.handle('create-session', async (_, sessionId) => {
 
       const sessionConfig = {
         sessionId,
-        enabledLanguages: (config.targetLanguages || ['en', 'es', 'fr', 'de', 'it']).map((lang: string) => `${lang}-${lang.toUpperCase()}`),
+        enabledLanguages: config.targetLanguages || ['en', 'es', 'fr', 'de', 'it'],
         ttsMode: config.tts.mode || 'neural',
         audioQuality: (config.tts.mode === 'neural' ? 'high' : 'medium') as 'high' | 'medium'
       };
