@@ -28,3 +28,8 @@ build/
 # Logs
 logs/
 *.log
+
+
+# WebSocket Server Runtime Files
+src/websocket-server/sessions/*.json
+src/websocket-server/audio-cache/
