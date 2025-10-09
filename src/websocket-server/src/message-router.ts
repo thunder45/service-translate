@@ -4,6 +4,16 @@ import { MessageValidator } from './message-validator';
 import { AudioManager } from './audio-manager';
 import { TTSService } from './tts-service';
 import { TTSFallbackManager } from './tts-fallback-manager';
+import { AuthManager } from './auth-manager';
+import { AdminIdentityManager } from './admin-identity-manager';
+import { 
+  AdminAuthMessage,
+  AdminAuthResponse,
+  SessionSummary,
+  AdminErrorCode,
+  ERROR_MESSAGES,
+  TargetLanguage as SharedTargetLanguage
+} from '../../shared/types';
 import { 
   ErrorMessage,
   SessionMetadataMessage,
@@ -19,6 +29,8 @@ export class MessageRouter {
   constructor(
     private io: SocketIOServer,
     private sessionManager: SessionManager,
+    private authManager: AuthManager,
+    private adminIdentityManager: AdminIdentityManager,
     private audioManager?: AudioManager,
     private errorLogger?: any
   ) {
@@ -39,6 +51,15 @@ export class MessageRouter {
 
     try {
       switch (messageType) {
+        case 'admin-auth':
+          this.handleAdminAuth(socket, data);
+          break;
+        case 'token-refresh':
+          this.handleTokenRefresh(socket, data);
+          break;
+        case 'admin-session-access':
+          this.handleAdminSessionAccess(socket, data);
+          break;
         case 'start-session':
           this.handleStartSession(socket, data);
           break;
@@ -46,7 +67,7 @@ export class MessageRouter {
           this.handleEndSession(socket, data);
           break;
         case 'list-sessions':
-          this.handleListSessions(socket);
+          this.handleListSessions(socket, data);
           break;
         case 'join-session':
           this.handleJoinSession(socket, data);
@@ -59,6 +80,9 @@ export class MessageRouter {
           break;
         case 'config-update':
           this.handleConfigUpdate(socket, data);
+          break;
+        case 'update-session-config':
+          this.handleUpdateSessionConfig(socket, data);
           break;
         case 'broadcast-translation':
           this.handleTranslationBroadcast(socket, data);
@@ -81,32 +105,553 @@ export class MessageRouter {
     }
   }
 
+  // ============================================================================
+  // Admin Authentication Handlers (Task 5.1)
+  // ============================================================================
+
+  /**
+   * Handle admin authentication with both credential and token methods
+   */
+  private async handleAdminAuth(socket: Socket, data: AdminAuthMessage): Promise<void> {
+    console.log(`Admin authentication request from ${socket.id}, method: ${data.method}`);
+
+    try {
+      // Validate required fields
+      if (!data.method || (data.method !== 'credentials' && data.method !== 'token')) {
+        this.sendAdminError(socket, AdminErrorCode.VALIDATION_INVALID_INPUT, {
+          validationErrors: ['method must be either "credentials" or "token"']
+        });
+        return;
+      }
+
+      let adminIdentity;
+      let tokens;
+      let isReconnection = false;
+
+      if (data.method === 'credentials') {
+        // Credential-based authentication
+        if (!data.username || !data.password) {
+          this.sendAdminError(socket, AdminErrorCode.VALIDATION_MISSING_REQUIRED_FIELD, {
+            validationErrors: ['username and password are required for credentials method']
+          });
+          return;
+        }
+
+        // Authenticate with AuthManager
+        const authSessionId = this.authManager.authenticate(
+          data.username,
+          data.password,
+          socket.handshake.address,
+          socket.handshake.headers['user-agent']
+        );
+
+        if (!authSessionId) {
+          this.sendAdminError(socket, AdminErrorCode.AUTH_INVALID_CREDENTIALS);
+          return;
+        }
+
+        // Register or retrieve admin identity
+        adminIdentity = this.adminIdentityManager.registerAdminConnection(data.username, socket.id);
+        
+        // Generate JWT tokens
+        tokens = this.adminIdentityManager.generateTokenPair(adminIdentity.adminId);
+        
+        // Schedule token expiry warning
+        this.adminIdentityManager.scheduleExpiryWarning(
+          adminIdentity.adminId,
+          tokens.accessTokenExpiry,
+          (adminId, expiresAt, timeRemaining) => {
+            this.sendTokenExpiryWarning(adminId, expiresAt, timeRemaining);
+          }
+        );
+
+        console.log(`Admin authenticated with credentials: ${data.username} (${adminIdentity.adminId})`);
+      } else {
+        // Token-based authentication
+        if (!data.token) {
+          this.sendAdminError(socket, AdminErrorCode.VALIDATION_MISSING_REQUIRED_FIELD, {
+            validationErrors: ['token is required for token method']
+          });
+          return;
+        }
+
+        try {
+          // Validate token and register connection
+          adminIdentity = this.adminIdentityManager.registerAdminConnectionWithToken(data.token, socket.id);
+          
+          // Check if token needs refresh
+          const tokenStatus = this.adminIdentityManager.checkTokenStatus(data.token);
+          if (tokenStatus.needsRefresh) {
+            // Token is valid but expiring soon, include in response
+            console.log(`Token for admin ${adminIdentity.adminId} needs refresh (${tokenStatus.timeRemaining}s remaining)`);
+          }
+          
+          // Use existing token
+          tokens = {
+            accessToken: data.token,
+            refreshToken: '', // Client should already have refresh token
+            accessTokenExpiry: this.adminIdentityManager.getTokenExpiry(data.token)!,
+            refreshTokenExpiry: new Date() // Not used for token auth
+          };
+          
+          // Schedule token expiry warning
+          this.adminIdentityManager.scheduleExpiryWarning(
+            adminIdentity.adminId,
+            tokens.accessTokenExpiry,
+            (adminId, expiresAt, timeRemaining) => {
+              this.sendTokenExpiryWarning(adminId, expiresAt, timeRemaining);
+            }
+          );
+
+          isReconnection = true;
+          console.log(`Admin reconnected with token: ${adminIdentity.username} (${adminIdentity.adminId})`);
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          if (errorMessage.includes('expired')) {
+            this.sendAdminError(socket, AdminErrorCode.AUTH_TOKEN_EXPIRED);
+          } else if (errorMessage.includes('invalid')) {
+            this.sendAdminError(socket, AdminErrorCode.AUTH_TOKEN_INVALID);
+          } else {
+            this.sendAdminError(socket, AdminErrorCode.SYSTEM_INTERNAL_ERROR, {
+              operation: 'token-validation'
+            });
+          }
+          return;
+        }
+      }
+
+      // Recover admin sessions
+      const ownedSessionIds = this.adminIdentityManager.recoverAdminSessions(adminIdentity.adminId);
+      
+      // Update session admin socket IDs
+      const updatedCount = this.adminIdentityManager.updateSessionAdminSocket(
+        adminIdentity.adminId,
+        socket.id,
+        (sessionId, newSocketId) => {
+          this.sessionManager.updateCurrentAdminSocket(sessionId, newSocketId);
+        }
+      );
+
+      // Get owned sessions with full details
+      const ownedSessions: SessionSummary[] = ownedSessionIds.map(sessionId => {
+        const session = this.sessionManager.getSession(sessionId);
+        if (!session) return null;
+        
+        return {
+          sessionId: session.sessionId,
+          status: session.status,
+          clientCount: session.clients.size,
+          createdAt: session.createdAt.toISOString(),
+          createdBy: session.createdBy,
+          isOwner: true,
+          config: {
+            enabledLanguages: session.config.enabledLanguages,
+            ttsMode: session.config.ttsMode
+          }
+        };
+      }).filter(s => s !== null) as SessionSummary[];
+
+      // Get all sessions
+      const allSessions: SessionSummary[] = this.sessionManager.getAllSessions().map(session => ({
+        sessionId: session.sessionId,
+        status: session.status,
+        clientCount: session.clients.size,
+        createdAt: session.createdAt.toISOString(),
+        createdBy: session.createdBy,
+        isOwner: session.adminId === adminIdentity.adminId,
+        config: {
+          enabledLanguages: session.config.enabledLanguages,
+          ttsMode: session.config.ttsMode
+        }
+      }));
+
+      // Get admin permissions
+      const permissions = this.adminIdentityManager.getAdminPermissions(adminIdentity.adminId);
+
+      // Send successful authentication response
+      const response: AdminAuthResponse = {
+        type: 'admin-auth-response',
+        success: true,
+        adminId: adminIdentity.adminId,
+        username: adminIdentity.username,
+        token: tokens.accessToken,
+        tokenExpiry: tokens.accessTokenExpiry.toISOString(),
+        refreshToken: data.method === 'credentials' ? tokens.refreshToken : undefined,
+        ownedSessions,
+        allSessions,
+        permissions,
+        timestamp: new Date().toISOString()
+      };
+
+      socket.emit('admin-auth-response', response);
+
+      // If reconnection, send reconnection notification
+      if (isReconnection && ownedSessionIds.length > 0) {
+        socket.emit('admin-reconnection', {
+          type: 'admin-reconnection',
+          adminId: adminIdentity.adminId,
+          username: adminIdentity.username,
+          recoveredSessions: ownedSessionIds,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      console.log(`Admin authentication successful: ${adminIdentity.username}, recovered ${updatedCount} sessions`);
+    } catch (error) {
+      console.error('Admin authentication error:', error);
+      this.sendAdminError(socket, AdminErrorCode.SYSTEM_INTERNAL_ERROR, {
+        operation: 'admin-auth'
+      });
+    }
+  }
+
+  /**
+   * Send token expiry warning to admin
+   */
+  private sendTokenExpiryWarning(adminId: string, expiresAt: Date, timeRemaining: number): void {
+    const sockets = this.adminIdentityManager.getAdminSockets(adminId);
+    
+    for (const socketId of sockets) {
+      this.io.to(socketId).emit('token-expiry-warning', {
+        type: 'token-expiry-warning',
+        adminId,
+        expiresAt: expiresAt.toISOString(),
+        timeRemaining,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    console.log(`Sent token expiry warning to admin ${adminId} (${timeRemaining}s remaining)`);
+  }
+
+  /**
+   * Send admin error message
+   */
+  private sendAdminError(
+    socket: Socket,
+    errorCode: AdminErrorCode,
+    details?: {
+      sessionId?: string;
+      operation?: string;
+      adminId?: string;
+      validationErrors?: string[];
+    }
+  ): void {
+    const errorInfo = ERROR_MESSAGES[errorCode];
+    
+    socket.emit('admin-error', {
+      type: 'admin-error',
+      errorCode,
+      message: errorInfo.message,
+      userMessage: errorInfo.userMessage,
+      retryable: errorInfo.retryable,
+      retryAfter: errorInfo.retryAfter,
+      details,
+      timestamp: new Date().toISOString()
+    });
+    
+    console.error(`Admin error sent to ${socket.id}: ${errorCode} - ${errorInfo.message}`, details);
+  }
+
+  // ============================================================================
+  // Token Management Handlers (Task 5.2)
+  // ============================================================================
+
+  /**
+   * Handle token refresh request
+   */
+  private async handleTokenRefresh(socket: Socket, data: any): Promise<void> {
+    console.log(`Token refresh request from ${socket.id}`);
+
+    try {
+      // Validate required fields
+      if (!data.refreshToken) {
+        this.sendAdminError(socket, AdminErrorCode.VALIDATION_MISSING_REQUIRED_FIELD, {
+          operation: 'token-refresh',
+          validationErrors: ['refreshToken is required']
+        });
+        return;
+      }
+
+      // Attempt to refresh tokens
+      const tokens = this.adminIdentityManager.handleTokenRefresh(
+        data.refreshToken,
+        (adminId, newTokens) => {
+          // Success callback - schedule new expiry warning
+          this.adminIdentityManager.scheduleExpiryWarning(
+            adminId,
+            newTokens.accessTokenExpiry,
+            (adminId, expiresAt, timeRemaining) => {
+              this.sendTokenExpiryWarning(adminId, expiresAt, timeRemaining);
+            }
+          );
+          
+          console.log(`Token refreshed successfully for admin ${adminId}`);
+        },
+        (error) => {
+          // Error callback
+          console.error('Token refresh failed:', error);
+        }
+      );
+
+      if (tokens) {
+        // Send success response
+        socket.emit('token-refresh-response', {
+          type: 'token-refresh-response',
+          success: true,
+          token: tokens.accessToken,
+          tokenExpiry: tokens.accessTokenExpiry.toISOString(),
+          refreshToken: tokens.refreshToken,
+          timestamp: new Date().toISOString()
+        });
+        
+        console.log(`Token refresh successful for socket ${socket.id}`);
+      } else {
+        // Refresh failed
+        this.sendAdminError(socket, AdminErrorCode.AUTH_REFRESH_TOKEN_INVALID, {
+          operation: 'token-refresh'
+        });
+      }
+    } catch (error) {
+      console.error('Token refresh error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
+      if (errorMessage.includes('expired')) {
+        this.sendAdminError(socket, AdminErrorCode.AUTH_REFRESH_TOKEN_EXPIRED);
+      } else if (errorMessage.includes('invalid') || errorMessage.includes('not found')) {
+        this.sendAdminError(socket, AdminErrorCode.AUTH_REFRESH_TOKEN_INVALID);
+      } else {
+        this.sendAdminError(socket, AdminErrorCode.SYSTEM_INTERNAL_ERROR, {
+          operation: 'token-refresh'
+        });
+      }
+    }
+  }
+
+  /**
+   * Send session expired notification to admin
+   */
+  private sendSessionExpiredNotification(adminId: string, reason: 'token-expired' | 'invalid-token' | 'revoked'): void {
+    const sockets = this.adminIdentityManager.getAdminSockets(adminId);
+    
+    for (const socketId of sockets) {
+      this.io.to(socketId).emit('session-expired', {
+        type: 'session-expired',
+        adminId,
+        reason,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    console.log(`Sent session expired notification to admin ${adminId} (reason: ${reason})`);
+  }
+
+  /**
+   * Clean up expired tokens for an admin
+   * Called periodically or on specific events
+   */
+  private cleanupExpiredTokens(adminId: string): void {
+    try {
+      const identity = this.adminIdentityManager.getAdminIdentity(adminId);
+      if (!identity) {
+        return;
+      }
+
+      // Check each refresh token for expiry
+      const expiredTokens: string[] = [];
+      for (const refreshToken of identity.refreshTokens) {
+        try {
+          const tokenStatus = this.adminIdentityManager.checkTokenStatus(refreshToken);
+          if (tokenStatus.isExpired) {
+            expiredTokens.push(refreshToken);
+          }
+        } catch (error) {
+          // Token is invalid, mark for removal
+          expiredTokens.push(refreshToken);
+        }
+      }
+
+      // Remove expired tokens
+      for (const token of expiredTokens) {
+        this.adminIdentityManager.revokeRefreshToken(adminId, token);
+      }
+
+      if (expiredTokens.length > 0) {
+        console.log(`Cleaned up ${expiredTokens.length} expired tokens for admin ${adminId}`);
+      }
+    } catch (error) {
+      console.error(`Failed to cleanup expired tokens for admin ${adminId}:`, error);
+    }
+  }
+
+  /**
+   * Start automatic token cleanup scheduler
+   * Runs every hour to clean up expired tokens
+   */
+  public startTokenCleanupScheduler(): void {
+    setInterval(() => {
+      console.log('Running automatic token cleanup...');
+      const allAdmins = this.adminIdentityManager.getAllAdminIdentities();
+      
+      for (const admin of allAdmins) {
+        this.cleanupExpiredTokens(admin.adminId);
+      }
+    }, 60 * 60 * 1000); // Every hour
+    
+    console.log('Token cleanup scheduler started');
+  }
+
+  // ============================================================================
+  // Admin Session Access Handlers (Task 5.4)
+  // ============================================================================
+
+  /**
+   * Handle admin session access request
+   * Allows admins to view (read-only) sessions created by other admins
+   */
+  private handleAdminSessionAccess(socket: Socket, data: any): void {
+    // Get admin identity
+    const adminIdentity = this.adminIdentityManager.getAdminBySocketId(socket.id);
+    if (!adminIdentity) {
+      this.sendAdminError(socket, AdminErrorCode.AUTH_SESSION_NOT_FOUND);
+      return;
+    }
+
+    // Validate required fields
+    if (!data.sessionId) {
+      this.sendAdminError(socket, AdminErrorCode.VALIDATION_MISSING_REQUIRED_FIELD, {
+        operation: 'admin-session-access',
+        validationErrors: ['sessionId is required']
+      });
+      return;
+    }
+
+    if (!data.accessType || (data.accessType !== 'read' && data.accessType !== 'write')) {
+      this.sendAdminError(socket, AdminErrorCode.VALIDATION_INVALID_INPUT, {
+        operation: 'admin-session-access',
+        validationErrors: ['accessType must be either "read" or "write"']
+      });
+      return;
+    }
+
+    const { sessionId, accessType } = data;
+
+    // Get session
+    const session = this.sessionManager.getSession(sessionId);
+    if (!session) {
+      this.sendAdminError(socket, AdminErrorCode.SESSION_NOT_FOUND, { sessionId });
+      return;
+    }
+
+    // Verify access
+    const hasAccess = this.sessionManager.verifyAdminAccess(sessionId, adminIdentity.adminId, accessType);
+    
+    if (!hasAccess) {
+      if (accessType === 'write') {
+        // Write access denied - only owner can modify
+        this.sendAdminError(socket, AdminErrorCode.AUTHZ_SESSION_NOT_OWNED, {
+          sessionId,
+          adminId: adminIdentity.adminId,
+          operation: 'admin-session-access'
+        });
+      } else {
+        // Read access should always be granted, but just in case
+        this.sendAdminError(socket, AdminErrorCode.AUTHZ_ACCESS_DENIED, {
+          sessionId,
+          adminId: adminIdentity.adminId,
+          operation: 'admin-session-access'
+        });
+      }
+      return;
+    }
+
+    // Prepare session data response
+    // For read-only access, include full session data but mark as read-only
+    const sessionData = {
+      sessionId: session.sessionId,
+      adminId: session.adminId,
+      currentAdminSocketId: session.currentAdminSocketId,
+      createdBy: session.createdBy,
+      config: session.config,
+      clients: Array.from(session.clients.values()).map(client => ({
+        socketId: client.socketId,
+        preferredLanguage: client.preferredLanguage,
+        joinedAt: client.joinedAt.toISOString(),
+        lastSeen: client.lastSeen.toISOString(),
+        audioCapabilities: client.audioCapabilities
+      })),
+      createdAt: session.createdAt.toISOString(),
+      lastActivity: session.lastActivity.toISOString(),
+      status: session.status,
+      isOwner: session.adminId === adminIdentity.adminId,
+      accessType
+    };
+
+    // Send success response
+    socket.emit('admin-session-access-response', {
+      type: 'admin-session-access-response',
+      success: true,
+      sessionId,
+      accessType,
+      sessionData,
+      timestamp: new Date().toISOString()
+    });
+
+    console.log(`Admin ${adminIdentity.username} accessed session ${sessionId} with ${accessType} access`);
+  }
+
   /**
    * Handle session creation (admin only)
    */
   private handleStartSession(socket: Socket, data: any): void {
+    // Get admin identity
+    const adminIdentity = this.adminIdentityManager.getAdminBySocketId(socket.id);
+    if (!adminIdentity) {
+      this.sendAdminError(socket, AdminErrorCode.AUTH_SESSION_NOT_FOUND);
+      return;
+    }
+
     const validation = MessageValidator.validateStartSession(data);
     if (!validation.valid || !validation.message) {
-      this.sendError(socket, 400, validation.error || 'Invalid start session message');
+      this.sendAdminError(socket, AdminErrorCode.VALIDATION_INVALID_INPUT, {
+        operation: 'start-session',
+        validationErrors: [validation.error || 'Invalid start session message']
+      });
       return;
     }
 
     const { sessionId, config } = validation.message;
 
     try {
-      const sessionData = this.sessionManager.createSession(sessionId, config, socket.id);
+      // Create session with admin identity
+      const sessionData = this.sessionManager.createSession(
+        sessionId,
+        config,
+        adminIdentity.adminId,
+        socket.id,
+        adminIdentity.username
+      );
+      
+      // Add session to admin's owned sessions
+      this.adminIdentityManager.addOwnedSession(adminIdentity.adminId, sessionId);
       
       socket.join(sessionId);
-      socket.emit('session-started', {
-        type: 'session-started',
+      socket.emit('start-session-response', {
+        type: 'start-session-response',
+        success: true,
         sessionId,
+        adminId: adminIdentity.adminId,
         config,
         timestamp: new Date().toISOString()
       });
       
-      console.log(`Session started: ${sessionId} by admin ${socket.id}`);
+      console.log(`Session started: ${sessionId} by admin ${adminIdentity.username} (${adminIdentity.adminId})`);
     } catch (error) {
-      this.sendError(socket, 400, error instanceof Error ? error.message : 'Failed to start session', { sessionId });
+      console.error('Failed to start session:', error);
+      this.sendAdminError(socket, AdminErrorCode.SESSION_CREATION_FAILED, {
+        sessionId,
+        operation: 'start-session'
+      });
     }
   }
 
@@ -114,28 +659,44 @@ export class MessageRouter {
    * Handle session end (admin only)
    */
   private handleEndSession(socket: Socket, data: any): void {
+    // Get admin identity
+    const adminIdentity = this.adminIdentityManager.getAdminBySocketId(socket.id);
+    if (!adminIdentity) {
+      this.sendAdminError(socket, AdminErrorCode.AUTH_SESSION_NOT_FOUND);
+      return;
+    }
+
     const { sessionId } = data;
     
     if (!sessionId) {
-      this.sendError(socket, 400, 'sessionId is required');
+      this.sendAdminError(socket, AdminErrorCode.VALIDATION_MISSING_REQUIRED_FIELD, {
+        operation: 'end-session',
+        validationErrors: ['sessionId is required']
+      });
       return;
     }
 
     const session = this.sessionManager.getSession(sessionId);
     if (!session) {
-      this.sendError(socket, 404, 'Session not found', { sessionId });
+      this.sendAdminError(socket, AdminErrorCode.SESSION_NOT_FOUND, { sessionId });
       return;
     }
 
-    // Verify admin
-    if (session.adminSocketId !== socket.id) {
-      this.sendError(socket, 403, 'Only session admin can end the session', { sessionId });
+    // Verify admin ownership
+    if (!this.sessionManager.verifyAdminAccess(sessionId, adminIdentity.adminId, 'write')) {
+      this.sendAdminError(socket, AdminErrorCode.AUTHZ_SESSION_NOT_OWNED, {
+        sessionId,
+        adminId: adminIdentity.adminId
+      });
       return;
     }
 
     const success = this.sessionManager.endSession(sessionId);
     
     if (success) {
+      // Remove session from admin's owned sessions
+      this.adminIdentityManager.removeOwnedSession(adminIdentity.adminId, sessionId);
+      
       // Notify all clients
       this.io.to(sessionId).emit('session-ended', {
         type: 'session-ended',
@@ -146,45 +707,94 @@ export class MessageRouter {
       // Disconnect all clients from room
       this.io.in(sessionId).socketsLeave(sessionId);
       
-      socket.emit('session-ended', {
-        type: 'session-ended',
+      socket.emit('end-session-response', {
+        type: 'end-session-response',
+        success: true,
         sessionId,
         timestamp: new Date().toISOString()
       });
       
-      console.log(`Session ended: ${sessionId} by admin ${socket.id}`);
+      console.log(`Session ended: ${sessionId} by admin ${adminIdentity.username} (${adminIdentity.adminId})`);
     } else {
-      this.sendError(socket, 500, 'Failed to end session', { sessionId });
+      this.sendAdminError(socket, AdminErrorCode.SESSION_DELETE_FAILED, { sessionId });
+    }
+  }
+
+  private handleUpdateSessionConfig(socket: Socket, data: any): void {
+    const adminIdentity = this.adminIdentityManager.getAdminBySocketId(socket.id);
+    if (!adminIdentity) {
+      this.sendAdminError(socket, AdminErrorCode.AUTH_SESSION_NOT_FOUND);
+      return;
+    }
+
+    const { sessionId, config } = data;
+    
+    if (!sessionId || !config) {
+      this.sendAdminError(socket, AdminErrorCode.VALIDATION_MISSING_REQUIRED_FIELD, {
+        operation: 'update-session-config',
+        validationErrors: ['sessionId and config are required']
+      });
+      return;
+    }
+
+    if (!this.sessionManager.verifyAdminAccess(sessionId, adminIdentity.adminId, 'write')) {
+      this.sendAdminError(socket, AdminErrorCode.AUTHZ_SESSION_NOT_OWNED, { sessionId });
+      return;
+    }
+
+    const success = this.sessionManager.updateSessionConfig(sessionId, config);
+    
+    if (success) {
+      socket.emit('update-session-config-response', {
+        type: 'update-session-config-response',
+        success: true,
+        sessionId
+      });
+    } else {
+      this.sendAdminError(socket, AdminErrorCode.SESSION_UPDATE_FAILED, { sessionId });
     }
   }
 
   /**
-   * Handle list sessions request
+   * Handle list sessions request with admin-specific filtering
    */
-  private handleListSessions(socket: Socket): void {
-    const sessions = this.sessionManager.getAllSessions();
+  private handleListSessions(socket: Socket, data?: any): void {
+    // Get admin identity
+    const adminIdentity = this.adminIdentityManager.getAdminBySocketId(socket.id);
+    if (!adminIdentity) {
+      this.sendAdminError(socket, AdminErrorCode.AUTH_SESSION_NOT_FOUND);
+      return;
+    }
+
+    const filter = data?.filter || 'all'; // 'owned' or 'all'
     
-    const sessionsList = sessions.map(session => ({
+    let sessions;
+    if (filter === 'owned') {
+      sessions = this.sessionManager.getSessionsByAdmin(adminIdentity.adminId);
+    } else {
+      sessions = this.sessionManager.getAllSessions();
+    }
+    
+    const sessionsList: SessionSummary[] = sessions.map(session => ({
       sessionId: session.sessionId,
       status: session.status,
       clientCount: session.clients.size,
       createdAt: session.createdAt.toISOString(),
-      lastActivity: session.lastActivity.toISOString(),
-      isAdmin: session.adminSocketId === socket.id,
+      createdBy: session.createdBy,
+      isOwner: session.adminId === adminIdentity.adminId,
       config: {
         enabledLanguages: session.config.enabledLanguages,
-        ttsMode: session.config.ttsMode,
-        audioQuality: session.config.audioQuality
+        ttsMode: session.config.ttsMode
       }
     }));
     
-    socket.emit('sessions-list', {
-      type: 'sessions-list',
+    socket.emit('list-sessions-response', {
+      type: 'list-sessions-response',
       sessions: sessionsList,
       timestamp: new Date().toISOString()
     });
     
-    console.log(`Listed ${sessionsList.length} sessions for ${socket.id}`);
+    console.log(`Listed ${sessionsList.length} sessions for admin ${adminIdentity.username} (filter: ${filter})`);
   }
 
   /**
@@ -206,6 +816,7 @@ export class MessageRouter {
 
     const success = this.sessionManager.addClient(
       sessionId,
+      socket.id,
       socket.id,
       preferredLanguage,
       audioCapabilities
@@ -286,13 +897,33 @@ export class MessageRouter {
    * Handle configuration updates (admin only)
    */
   private handleConfigUpdate(socket: Socket, data: any): void {
+    // Get admin identity
+    const adminIdentity = this.adminIdentityManager.getAdminBySocketId(socket.id);
+    if (!adminIdentity) {
+      this.sendAdminError(socket, AdminErrorCode.AUTH_SESSION_NOT_FOUND);
+      return;
+    }
+
     const validation = MessageValidator.validateConfigUpdate(data);
     if (!validation.valid || !validation.message) {
-      this.sendError(socket, 400, validation.error || 'Invalid config update message');
+      this.sendAdminError(socket, AdminErrorCode.VALIDATION_INVALID_INPUT, {
+        operation: 'update-session-config',
+        validationErrors: [validation.error || 'Invalid config update message']
+      });
       return;
     }
 
     const { sessionId, config } = validation.message;
+    
+    // Verify admin ownership
+    if (!this.sessionManager.verifyAdminAccess(sessionId, adminIdentity.adminId, 'write')) {
+      this.sendAdminError(socket, AdminErrorCode.AUTHZ_SESSION_NOT_OWNED, {
+        sessionId,
+        adminId: adminIdentity.adminId
+      });
+      return;
+    }
+    
     const success = this.sessionManager.updateSessionConfig(sessionId, config);
     
     if (success) {
@@ -316,9 +947,19 @@ export class MessageRouter {
         config,
         timestamp: new Date().toISOString()
       });
-      console.log(`Config updated for session: ${sessionId}`);
+      
+      // Send success response to admin
+      socket.emit('update-session-config-response', {
+        type: 'update-session-config-response',
+        success: true,
+        sessionId,
+        config,
+        timestamp: new Date().toISOString()
+      });
+      
+      console.log(`Config updated for session: ${sessionId} by admin ${adminIdentity.username}`);
     } else {
-      this.sendError(socket, 404, 'Session not found or config update failed', { sessionId });
+      this.sendAdminError(socket, AdminErrorCode.SESSION_UPDATE_FAILED, { sessionId });
     }
   }
 
@@ -838,15 +1479,15 @@ export class MessageRouter {
     clients.forEach(client => {
       stats.clientsByLanguage[client.preferredLanguage]++;
       
-      if (client.audioCapabilities.supportsPolly) {
+      if (client.audioCapabilities?.supportsPolly) {
         stats.audioCapabilities.pollySupported++;
       }
       
-      if (client.audioCapabilities.localTTSLanguages.length > 0) {
+      if ((client.audioCapabilities?.localTTSLanguages.length || 0) > 0) {
         stats.audioCapabilities.localTTSSupported++;
       }
       
-      client.audioCapabilities.audioFormats.forEach(format => {
+      client.audioCapabilities?.audioFormats.forEach(format => {
         stats.audioCapabilities.audioFormatsSupported[format] = 
           (stats.audioCapabilities.audioFormatsSupported[format] || 0) + 1;
       });

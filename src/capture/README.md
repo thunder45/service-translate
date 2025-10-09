@@ -53,8 +53,40 @@ npm start
 
 ## Configuration
 
-### AWS Credentials
-Configure in the app UI:
+### Admin Authentication
+
+The Capture app now uses **persistent admin authentication** to manage sessions across reconnections.
+
+#### First-Time Setup
+1. Start the Capture app
+2. Connect to the WebSocket server (it will auto-start if not running)
+3. Enter admin credentials:
+   - **Username**: Your admin username (e.g., "admin")
+   - **Password**: Your admin password
+4. Click "Login"
+
+#### Authentication Features
+- **Persistent Sessions**: Your admin identity persists across reconnections
+- **Token Management**: Automatic token refresh before expiry
+- **Session Recovery**: Reconnect and regain control of your sessions
+- **Secure Storage**: Tokens encrypted using Electron safeStorage
+- **Expiry Warnings**: 5-minute warning before session expires
+
+#### Admin Identity Display
+After successful authentication:
+- Admin username displayed in header
+- Admin ID shown (first 8 characters)
+- Logout button available in top-right corner
+
+#### Session Ownership
+- **My Sessions**: View and manage sessions you created
+- **All Sessions**: View all active sessions (read-only for others' sessions)
+- **Ownership Indicators**: 
+  - 👤 OWNER badge for your sessions
+  - 👁️ READ-ONLY badge for other admins' sessions
+
+### AWS Credentials (Legacy)
+For backward compatibility with Cognito authentication:
 1. Click "Settings"
 2. Configure tabs:
    - **Languages**: Select source language and target languages
@@ -103,25 +135,48 @@ Configure in the app UI:
 npm start
 ```
 
-### 2. Configure AWS Credentials
-- Enter credentials in Settings
-- Test connection
+### 2. Admin Authentication
+- Enter admin username and password
+- Click "Login"
+- Your admin identity will be displayed in the header
+- Tokens are stored securely for automatic reconnection
 
-### 3. Start TTS Server
+### 3. Start TTS Server (Auto-starts)
+The WebSocket server will automatically start when you connect.
+Manual start:
 ```bash
 cd ../websocket-server
 npm start
 ```
 
-### 4. Create Session
+### 4. Session Management
+**Create a New Session:**
 - Enter session ID (e.g., "CHURCH-2025-001")
 - Click "Create Session"
+- Session will be owned by your admin identity
+
+**View Sessions:**
+- Click "My Sessions" to see sessions you created
+- Click "All Sessions" to see all active sessions
+- Owner sessions show 👤 OWNER badge
+- Other sessions show 👁️ READ-ONLY badge
+
+**Manage Sessions:**
+- Reconnect to your sessions after disconnection
+- End sessions you own
+- View (read-only) sessions created by other admins
 
 ### 5. Start Streaming
 - Select microphone
 - Click "Start"
 - Speak in configured source language
-- Translations sent to TTS Server
+- Translations sent to TTS Server and connected clients
+
+### 6. Token Management
+- Tokens automatically refresh 2 minutes before expiry
+- Warning shown 5 minutes before expiry
+- Click "Refresh" to manually extend session
+- Logout to clear tokens and disconnect
 
 ## Features
 
@@ -178,6 +233,32 @@ npm test
 
 ## Troubleshooting
 
+### Admin Authentication Issues
+
+**Cannot Login:**
+1. Verify WebSocket server is running
+2. Check admin credentials are correct
+3. Ensure server is accessible (default: localhost:3001)
+4. Check server logs for authentication errors
+
+**Session Expired:**
+1. Click "Refresh" when warning appears
+2. If refresh fails, logout and login again
+3. Check token expiry settings on server
+4. Verify system clock is accurate
+
+**Lost Session Control:**
+1. Logout and login again to re-authenticate
+2. Check "My Sessions" tab to see your sessions
+3. Verify admin identity matches session owner
+4. Contact administrator if session ownership is incorrect
+
+**Token Refresh Failed:**
+1. Logout and login with credentials
+2. Check network connectivity
+3. Verify refresh token hasn't expired
+4. Check server logs for token validation errors
+
 ### Audio Not Capturing
 **macOS:**
 1. Install sox: `brew install sox`
@@ -213,6 +294,26 @@ npm test
 3. Confirm API is enabled
 4. Test connection manually
 
+### Session Management Issues
+
+**Cannot Create Session:**
+1. Verify you are authenticated as admin
+2. Check session ID is unique
+3. Ensure WebSocket connection is active
+4. Review server logs for errors
+
+**Cannot End Session:**
+1. Verify you own the session (👤 OWNER badge)
+2. Check WebSocket connection is active
+3. Try refreshing session list
+4. Contact administrator if session is stuck
+
+**Sessions Not Appearing:**
+1. Click "Refresh" button
+2. Check WebSocket connection status
+3. Switch between "My Sessions" and "All Sessions" tabs
+4. Verify admin authentication is active
+
 ## Cost Management
 
 ### Typical Service Costs (2-hour service, 60 min speaking)
@@ -228,17 +329,44 @@ npm test
 
 ## Security
 
-### Credential Storage
+### Admin Token Storage
+- **Encryption**: Tokens encrypted using Electron safeStorage
+- **Storage Location**: OS-specific secure storage (Keychain on macOS, Credential Manager on Windows)
+- **Auto-Expiration**: Tokens expire after configured time (default: 1 hour)
+- **Refresh Tokens**: Longer-lived tokens for automatic renewal (default: 30 days)
+- **Secure Transmission**: Tokens never logged or transmitted in plain text
+
+### Admin Authentication Security
+- **JWT Tokens**: Industry-standard JSON Web Tokens for authentication
+- **Token Rotation**: Automatic token refresh before expiry
+- **Session Isolation**: Each admin has isolated session ownership
+- **Audit Trail**: All admin actions logged on server
+- **Rate Limiting**: Protection against brute-force attacks
+
+### Credential Storage (Legacy AWS)
 - Encrypted using Electron safeStorage
 - Stored in OS keychain
 - Auto-expiration after 24 hours
 - Never logged or transmitted
 
 ### Best Practices
-1. Use dedicated AWS user
-2. Rotate credentials regularly
-3. Set IAM permissions to minimum
-4. Monitor AWS CloudTrail logs
+1. **Admin Credentials**:
+   - Use strong, unique passwords
+   - Never share admin credentials
+   - Logout when not in use
+   - Monitor session activity
+   
+2. **AWS Credentials** (if using):
+   - Use dedicated AWS user
+   - Rotate credentials regularly
+   - Set IAM permissions to minimum
+   - Monitor AWS CloudTrail logs
+
+3. **Network Security**:
+   - Use secure WebSocket connections (WSS) in production
+   - Restrict server access to trusted networks
+   - Enable firewall rules
+   - Monitor connection logs
 
 ## Performance
 

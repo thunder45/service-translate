@@ -327,10 +327,14 @@
 <body>
     <div class="container">
         <button class="config-btn" onclick="showConfig()">⚙️ Configuration</button>
-        <button class="logout-btn hidden" onclick="logout()" id="logout-btn">🚪➡️ Logout</button>
+        <button class="logout-btn hidden" onclick="adminLogout()" id="admin-logout-btn">🚪 Logout</button>
         
         <div class="header">
             <h1>🎤 ADVM Service Translate</h1>
+            <div id="admin-identity-display" class="hidden" style="margin-top: 10px; padding: 8px 15px; background: rgba(255,255,255,0.15); border-radius: 8px; display: inline-block;">
+                <span style="font-size: 14px; font-weight: 500;">👤 Admin: <span id="admin-username-display">-</span></span>
+                <span style="margin-left: 15px; font-size: 12px; color: rgba(255,255,255,0.8);">ID: <span id="admin-id-display">-</span></span>
+            </div>
         </div>
 
         <!-- Configuration Panel -->
@@ -523,17 +527,32 @@
 
         <!-- Login Panel -->
         <div id="login-panel" class="card">
-            <h2>Admin Login</h2>
+            <h2>🔐 Admin Authentication</h2>
+            <div id="login-status" class="status info hidden"></div>
             <div class="login-form">
                 <div class="form-group">
                     <label>Username:</label>
-                    <input type="text" id="username" placeholder="admin@example.com" onkeypress="handleLoginKeyPress(event)">
+                    <input type="text" id="admin-username" placeholder="admin" onkeypress="handleAdminLoginKeyPress(event)" autocomplete="username">
                 </div>
                 <div class="form-group">
                     <label>Password:</label>
-                    <input type="password" id="password" onkeypress="handleLoginKeyPress(event)">
+                    <input type="password" id="admin-password" placeholder="Enter password" onkeypress="handleAdminLoginKeyPress(event)" autocomplete="current-password">
                 </div>
-                <button onclick="login()" id="login-btn">Login</button>
+                <button onclick="adminLogin()" id="admin-login-btn">🔑 Login</button>
+                <div style="margin-top: 15px; text-align: center; font-size: 12px; color: rgba(255,255,255,0.7);">
+                    Authenticating will create a persistent admin session
+                </div>
+            </div>
+        </div>
+
+        <!-- Token Expiry Warning -->
+        <div id="token-expiry-warning" class="status error hidden" style="position: fixed; top: 80px; right: 20px; max-width: 350px; z-index: 1000;">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+                <div>
+                    <strong>⚠️ Session Expiring Soon</strong>
+                    <div id="token-expiry-message" style="font-size: 12px; margin-top: 5px;"></div>
+                </div>
+                <button onclick="refreshAdminToken()" style="padding: 5px 10px; font-size: 11px; margin-left: 10px;">Refresh</button>
             </div>
         </div>
 
@@ -617,10 +636,23 @@
                     </div>
                 </div>
                 
+                <!-- Session View Tabs -->
+                <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                    <button id="my-sessions-tab" class="tab-button active" onclick="switchSessionView('my')" style="flex: 1; padding: 8px; font-size: 13px; border-radius: 4px;">
+                        👤 My Sessions
+                    </button>
+                    <button id="all-sessions-tab" class="tab-button" onclick="switchSessionView('all')" style="flex: 1; padding: 8px; font-size: 13px; border-radius: 4px;">
+                        🌐 All Sessions
+                    </button>
+                </div>
+                
                 <!-- Active Sessions List -->
                 <div style="margin-bottom: 15px;">
-                    <div style="font-size: 12px; color: rgba(255,255,255,0.7); margin-bottom: 8px;">Active Sessions:</div>
-                    <div id="sessions-list" style="max-height: 150px; overflow-y: auto; background: rgba(0,0,0,0.2); border-radius: 4px; padding: 8px;">
+                    <div style="font-size: 12px; color: rgba(255,255,255,0.7); margin-bottom: 8px;">
+                        <span id="sessions-list-title">My Active Sessions:</span>
+                        <span id="sessions-count" style="margin-left: 5px; color: #FFD700;">(0)</span>
+                    </div>
+                    <div id="sessions-list" style="max-height: 200px; overflow-y: auto; background: rgba(0,0,0,0.2); border-radius: 4px; padding: 8px;">
                         <div style="text-align: center; color: rgba(255,255,255,0.5); padding: 20px;">
                             Connect to server to view sessions
                         </div>
@@ -703,7 +735,11 @@
         }
 
         // Initialize VU meter on page load
-        document.addEventListener('DOMContentLoaded', initializeVUMeter);
+        document.addEventListener('DOMContentLoaded', () => {
+            initializeVUMeter();
+            // Check for stored admin tokens on startup
+            checkStoredAdminTokens();
+        });
 
         function handleLoginKeyPress(event) {
             if (event.key === 'Enter') {
@@ -1033,6 +1069,321 @@
             });
         }
 
+        // Admin authentication state
+        let adminAuthState = {
+            isAuthenticated: false,
+            adminId: null,
+            username: null,
+            token: null,
+            refreshToken: null,
+            tokenExpiry: null,
+            tokenRefreshTimer: null,
+            expiryWarningTimer: null
+        };
+
+        // Admin authentication functions
+        async function adminLogin() {
+            const username = document.getElementById('admin-username').value.trim();
+            const password = document.getElementById('admin-password').value;
+
+            if (!username || !password) {
+                showLoginStatus('Please enter username and password', 'error');
+                return;
+            }
+
+            const loginBtn = document.getElementById('admin-login-btn');
+            loginBtn.disabled = true;
+            loginBtn.textContent = '🔄 Authenticating...';
+
+            try {
+                // Authenticate with WebSocket server using admin credentials
+                const result = await window.electronAPI.adminAuthenticate({
+                    username,
+                    password
+                });
+
+                if (result.success) {
+                    // Store admin authentication state
+                    adminAuthState = {
+                        isAuthenticated: true,
+                        adminId: result.adminId,
+                        username: result.username,
+                        token: result.token,
+                        refreshToken: result.refreshToken,
+                        tokenExpiry: result.tokenExpiry ? new Date(result.tokenExpiry) : null,
+                        tokenRefreshTimer: null,
+                        expiryWarningTimer: null
+                    };
+
+                    // Store tokens securely
+                    await storeAdminTokens(result.token, result.refreshToken, result.tokenExpiry);
+
+                    // Setup token refresh and expiry warning timers
+                    setupTokenManagement();
+
+                    // Update UI
+                    document.getElementById('login-panel').classList.add('hidden');
+                    document.getElementById('main-app').classList.remove('hidden');
+                    document.getElementById('admin-logout-btn').classList.remove('hidden');
+                    document.getElementById('admin-identity-display').classList.remove('hidden');
+                    document.getElementById('admin-username-display').textContent = result.username;
+                    document.getElementById('admin-id-display').textContent = result.adminId.substring(0, 8) + '...';
+
+                    showStatus(`✅ Authenticated as ${result.username}`, 'success');
+
+                    // Load sessions after authentication
+                    if (result.ownedSessions || result.allSessions) {
+                        updateSessionsList(result.ownedSessions, result.allSessions);
+                    }
+
+                    // Auto-check and start WebSocket server
+                    checkAndStartWebSocketServer();
+                } else {
+                    showLoginStatus(result.error || 'Authentication failed', 'error');
+                }
+            } catch (error) {
+                console.error('Admin login error:', error);
+                showLoginStatus(`Authentication failed: ${error.message}`, 'error');
+            } finally {
+                loginBtn.disabled = false;
+                loginBtn.textContent = '🔑 Login';
+            }
+        }
+
+        async function adminLogout() {
+            try {
+                // Clear token management timers
+                if (adminAuthState.tokenRefreshTimer) {
+                    clearTimeout(adminAuthState.tokenRefreshTimer);
+                }
+                if (adminAuthState.expiryWarningTimer) {
+                    clearTimeout(adminAuthState.expiryWarningTimer);
+                }
+
+                // Clear stored tokens
+                await clearAdminTokens();
+
+                // Disconnect WebSocket
+                await window.electronAPI.disconnectWebSocket();
+
+                // Reset admin state
+                adminAuthState = {
+                    isAuthenticated: false,
+                    adminId: null,
+                    username: null,
+                    token: null,
+                    refreshToken: null,
+                    tokenExpiry: null,
+                    tokenRefreshTimer: null,
+                    expiryWarningTimer: null
+                };
+
+                // Update UI
+                document.getElementById('main-app').classList.add('hidden');
+                document.getElementById('login-panel').classList.remove('hidden');
+                document.getElementById('admin-logout-btn').classList.add('hidden');
+                document.getElementById('admin-identity-display').classList.add('hidden');
+                document.getElementById('token-expiry-warning').classList.add('hidden');
+
+                // Clear form
+                document.getElementById('admin-username').value = '';
+                document.getElementById('admin-password').value = '';
+
+                showLoginStatus('Logged out successfully', 'info');
+            } catch (error) {
+                console.error('Logout error:', error);
+                showStatus(`Logout error: ${error.message}`, 'error');
+            }
+        }
+
+        async function refreshAdminToken() {
+            if (!adminAuthState.refreshToken) {
+                showStatus('No refresh token available. Please log in again.', 'error');
+                await adminLogout();
+                return;
+            }
+
+            try {
+                const result = await window.electronAPI.refreshAdminToken({
+                    refreshToken: adminAuthState.refreshToken,
+                    adminId: adminAuthState.adminId
+                });
+
+                if (result.success) {
+                    // Update tokens
+                    adminAuthState.token = result.token;
+                    adminAuthState.refreshToken = result.refreshToken || adminAuthState.refreshToken;
+                    adminAuthState.tokenExpiry = result.tokenExpiry ? new Date(result.tokenExpiry) : null;
+
+                    // Store new tokens
+                    await storeAdminTokens(result.token, adminAuthState.refreshToken, result.tokenExpiry);
+
+                    // Reset token management timers
+                    setupTokenManagement();
+
+                    // Hide expiry warning
+                    document.getElementById('token-expiry-warning').classList.add('hidden');
+
+                    showStatus('✅ Session refreshed successfully', 'success');
+                } else {
+                    showStatus('Failed to refresh session. Please log in again.', 'error');
+                    await adminLogout();
+                }
+            } catch (error) {
+                console.error('Token refresh error:', error);
+                showStatus('Failed to refresh session. Please log in again.', 'error');
+                await adminLogout();
+            }
+        }
+
+        function setupTokenManagement() {
+            // Clear existing timers
+            if (adminAuthState.tokenRefreshTimer) {
+                clearTimeout(adminAuthState.tokenRefreshTimer);
+            }
+            if (adminAuthState.expiryWarningTimer) {
+                clearTimeout(adminAuthState.expiryWarningTimer);
+            }
+
+            if (!adminAuthState.tokenExpiry) {
+                return;
+            }
+
+            const now = Date.now();
+            const expiryTime = adminAuthState.tokenExpiry.getTime();
+            const timeUntilExpiry = expiryTime - now;
+
+            // Show warning 5 minutes before expiry
+            const warningTime = timeUntilExpiry - (5 * 60 * 1000);
+            if (warningTime > 0) {
+                adminAuthState.expiryWarningTimer = setTimeout(() => {
+                    showTokenExpiryWarning(5);
+                }, warningTime);
+            }
+
+            // Auto-refresh 2 minutes before expiry
+            const refreshTime = timeUntilExpiry - (2 * 60 * 1000);
+            if (refreshTime > 0) {
+                adminAuthState.tokenRefreshTimer = setTimeout(() => {
+                    refreshAdminToken();
+                }, refreshTime);
+            }
+        }
+
+        function showTokenExpiryWarning(minutesRemaining) {
+            const warningDiv = document.getElementById('token-expiry-warning');
+            const messageDiv = document.getElementById('token-expiry-message');
+            
+            messageDiv.textContent = `Your session will expire in ${minutesRemaining} minutes. Click refresh to extend.`;
+            warningDiv.classList.remove('hidden');
+
+            // Update countdown every minute
+            let remaining = minutesRemaining;
+            const countdownInterval = setInterval(() => {
+                remaining--;
+                if (remaining <= 0) {
+                    clearInterval(countdownInterval);
+                    messageDiv.textContent = 'Your session has expired. Please log in again.';
+                    setTimeout(() => adminLogout(), 3000);
+                } else {
+                    messageDiv.textContent = `Your session will expire in ${remaining} minute${remaining > 1 ? 's' : ''}. Click refresh to extend.`;
+                }
+            }, 60000);
+        }
+
+        async function storeAdminTokens(token, refreshToken, tokenExpiry) {
+            try {
+                await window.electronAPI.storeAdminTokens({
+                    token,
+                    refreshToken,
+                    tokenExpiry,
+                    adminId: adminAuthState.adminId,
+                    username: adminAuthState.username
+                });
+            } catch (error) {
+                console.error('Failed to store admin tokens:', error);
+            }
+        }
+
+        async function clearAdminTokens() {
+            try {
+                await window.electronAPI.clearAdminTokens();
+            } catch (error) {
+                console.error('Failed to clear admin tokens:', error);
+            }
+        }
+
+        async function checkStoredAdminTokens() {
+            try {
+                const stored = await window.electronAPI.loadStoredAdminTokens();
+                if (stored && stored.token && stored.tokenExpiry) {
+                    const expiry = new Date(stored.tokenExpiry);
+                    if (expiry > new Date()) {
+                        // Token is still valid, attempt to reconnect
+                        adminAuthState = {
+                            isAuthenticated: true,
+                            adminId: stored.adminId,
+                            username: stored.username,
+                            token: stored.token,
+                            refreshToken: stored.refreshToken,
+                            tokenExpiry: expiry,
+                            tokenRefreshTimer: null,
+                            expiryWarningTimer: null
+                        };
+
+                        // Try to authenticate with stored token
+                        const result = await window.electronAPI.adminAuthenticateWithToken({
+                            token: stored.token
+                        });
+
+                        if (result.success) {
+                            // Update UI
+                            document.getElementById('login-panel').classList.add('hidden');
+                            document.getElementById('main-app').classList.remove('hidden');
+                            document.getElementById('admin-logout-btn').classList.remove('hidden');
+                            document.getElementById('admin-identity-display').classList.remove('hidden');
+                            document.getElementById('admin-username-display').textContent = stored.username;
+                            document.getElementById('admin-id-display').textContent = stored.adminId.substring(0, 8) + '...';
+
+                            setupTokenManagement();
+                            showStatus(`✅ Reconnected as ${stored.username}`, 'success');
+
+                            // Load sessions
+                            if (result.ownedSessions || result.allSessions) {
+                                updateSessionsList(result.ownedSessions, result.allSessions);
+                            }
+
+                            checkAndStartWebSocketServer();
+                            return true;
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to check stored tokens:', error);
+            }
+            return false;
+        }
+
+        function showLoginStatus(message, type) {
+            const statusDiv = document.getElementById('login-status');
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+            statusDiv.classList.remove('hidden');
+            
+            if (type === 'success' || type === 'info') {
+                setTimeout(() => {
+                    statusDiv.classList.add('hidden');
+                }, 3000);
+            }
+        }
+
+        function handleAdminLoginKeyPress(event) {
+            if (event.key === 'Enter') {
+                adminLogin();
+            }
+        }
+
+        // Legacy login function (kept for backward compatibility with Cognito)
         async function login() {
             const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
@@ -1178,6 +1529,36 @@
             showStatus(`Generated session ID: ${sessionId}`, 'success');
         }
         
+        // Session view state
+        let currentSessionView = 'my'; // 'my' or 'all'
+        let allSessionsData = { owned: [], all: [] };
+
+        function switchSessionView(view) {
+            currentSessionView = view;
+            
+            // Update tab styling
+            document.getElementById('my-sessions-tab').classList.toggle('active', view === 'my');
+            document.getElementById('all-sessions-tab').classList.toggle('active', view === 'all');
+            
+            // Update title
+            document.getElementById('sessions-list-title').textContent = 
+                view === 'my' ? 'My Active Sessions:' : 'All Active Sessions:';
+            
+            // Display appropriate sessions
+            const sessionsToDisplay = view === 'my' ? allSessionsData.owned : allSessionsData.all;
+            displaySessions(sessionsToDisplay);
+        }
+
+        function updateSessionsList(ownedSessions, allSessions) {
+            allSessionsData = {
+                owned: ownedSessions || [],
+                all: allSessions || []
+            };
+            
+            // Display based on current view
+            switchSessionView(currentSessionView);
+        }
+
         async function refreshSessions() {
             try {
                 const result = await window.electronAPI.listSessions();
@@ -1186,7 +1567,8 @@
                     throw new Error(result.error || 'Failed to list sessions');
                 }
                 
-                displaySessions(result.sessions || []);
+                // Update sessions data
+                updateSessionsList(result.ownedSessions || [], result.allSessions || result.sessions || []);
             } catch (error) {
                 console.error('Failed to refresh sessions:', error);
                 document.getElementById('sessions-list').innerHTML = 
@@ -1196,6 +1578,9 @@
 
         function displaySessions(sessions) {
             const container = document.getElementById('sessions-list');
+            const countSpan = document.getElementById('sessions-count');
+            
+            countSpan.textContent = `(${sessions.length})`;
             
             if (sessions.length === 0) {
                 container.innerHTML = 
@@ -1203,26 +1588,77 @@
                 return;
             }
             
-            container.innerHTML = sessions.map(session => `
-                <div style="background: rgba(255,255,255,0.05); padding: 10px; margin-bottom: 8px; border-radius: 4px; border-left: 3px solid ${session.status === 'started' ? '#4CAF50' : '#999'};">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <div>
-                            <div style="font-weight: bold; color: #FFD700;">${session.sessionId}</div>
-                            <div style="font-size: 11px; color: rgba(255,255,255,0.6);">
-                                ${session.clientCount} clients • ${session.config.ttsMode} • ${session.status}
+            container.innerHTML = sessions.map(session => {
+                const isOwner = session.isOwner === true;
+                const isReadOnly = !isOwner;
+                const ownershipBadge = isOwner 
+                    ? '<span style="background: #4CAF50; padding: 2px 8px; border-radius: 3px; font-size: 10px; margin-right: 5px;">👤 OWNER</span>'
+                    : '<span style="background: #FF9800; padding: 2px 8px; border-radius: 3px; font-size: 10px; margin-right: 5px;">👁️ READ-ONLY</span>';
+                
+                const createdByText = session.createdBy ? `Created by: ${session.createdBy}` : '';
+                
+                return `
+                    <div style="background: rgba(255,255,255,0.05); padding: 10px; margin-bottom: 8px; border-radius: 4px; border-left: 3px solid ${isOwner ? '#4CAF50' : '#FF9800'};">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div style="flex: 1;">
+                                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                                    ${ownershipBadge}
+                                    <div style="font-weight: bold; color: #FFD700;">${session.sessionId}</div>
+                                </div>
+                                <div style="font-size: 11px; color: rgba(255,255,255,0.6);">
+                                    ${session.clientCount} clients • ${session.config?.ttsMode || 'unknown'} • ${session.status}
+                                </div>
+                                ${createdByText ? `<div style="font-size: 10px; color: rgba(255,255,255,0.5); margin-top: 2px;">${createdByText}</div>` : ''}
+                            </div>
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                ${isOwner ? `
+                                    <button onclick="reconnectToSession('${session.sessionId}')" style="padding: 4px 12px; font-size: 11px; background: #2196F3;">
+                                        ↻ Reconnect
+                                    </button>
+                                    <button onclick="endSessionFromList('${session.sessionId}')" style="padding: 4px 12px; font-size: 11px; background: #f44336;">
+                                        ✕ End
+                                    </button>
+                                ` : `
+                                    <button onclick="viewSession('${session.sessionId}')" style="padding: 4px 12px; font-size: 11px; background: #2196F3;">
+                                        👁️ View
+                                    </button>
+                                    <span style="font-size: 10px; color: rgba(255,255,255,0.5);">Read-only</span>
+                                `}
                             </div>
                         </div>
-                        <div style="display: flex; gap: 8px; align-items: center;">
-                            ${session.isAdmin ? '<span style="background: #4CAF50; padding: 2px 8px; border-radius: 3px; font-size: 10px;">ADMIN</span>' : ''}
-                            <button onclick="reconnectToSession('${session.sessionId}')" style="padding: 4px 12px; font-size: 11px; background: #2196F3;">
-                                ↻ Reconnect
-                            </button>
-                            <button onclick="endSessionFromList('${session.sessionId}')" style="padding: 4px 12px; font-size: 11px; background: #f44336;">
-                                ✕ End
-                            </button>
-                        </div>
                     </div>
-                </div>
+                `;
+            }).join('');
+        }
+
+        async function viewSession(sessionId) {
+            showStatus(`Viewing session ${sessionId} (read-only)`, 'info');
+            // In a full implementation, this would show session details in a modal or panel
+        }
+
+        async function reconnectToSession(sessionId) {
+            try {
+                showStatus(`Reconnecting to session ${sessionId}...`, 'info');
+                // Implementation would reconnect to the session
+                await refreshSessions();
+            } catch (error) {
+                showStatus(`Failed to reconnect: ${error.message}`, 'error');
+            }
+        }
+
+        async function endSessionFromList(sessionId) {
+            if (!confirm(`Are you sure you want to end session ${sessionId}?`)) {
+                return;
+            }
+            
+            try {
+                showStatus(`Ending session ${sessionId}...`, 'info');
+                await window.electronAPI.endSession(sessionId);
+                showStatus(`Session ${sessionId} ended successfully`, 'success');
+                await refreshSessions();
+            } catch (error) {
+                showStatus(`Failed to end session: ${error.message}`, 'error');
+            }
             `).join('');
         }
 

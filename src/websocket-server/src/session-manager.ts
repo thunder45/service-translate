@@ -1,6 +1,6 @@
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
+import { writeFileSync, readFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'fs';
 import { join } from 'path';
-import { SessionData, SessionConfig, ClientData, AudioCapabilities, TargetLanguage } from './types';
+import { SessionData, SessionConfig, ClientData, AudioCapabilities, TargetLanguage } from '../../shared/types';
 
 export class SessionManager {
   private sessions: Map<string, SessionData> = new Map();
@@ -9,6 +9,7 @@ export class SessionManager {
   constructor(persistenceDir: string = './sessions') {
     this.persistenceDir = persistenceDir;
     this.ensurePersistenceDir();
+    this.migrateOldSessionFiles(); // Migrate old format before loading
     this.loadPersistedSessions();
   }
 
@@ -28,16 +29,18 @@ export class SessionManager {
   }
 
   /**
-   * Create a new session
+   * Create a new session with admin identity
    */
-  createSession(sessionId: string, config: SessionConfig, adminSocketId: string): SessionData {
+  createSession(sessionId: string, config: SessionConfig, adminId: string, adminSocketId: string, createdBy: string): SessionData {
     if (this.sessions.has(sessionId)) {
       throw new Error(`Session ${sessionId} already exists`);
     }
 
     const sessionData: SessionData = {
       sessionId,
-      adminSocketId,
+      adminId,
+      currentAdminSocketId: adminSocketId,
+      createdBy,
       config,
       clients: new Map(),
       createdAt: new Date(),
@@ -48,7 +51,7 @@ export class SessionManager {
     this.sessions.set(sessionId, sessionData);
     this.persistSession(sessionData);
     
-    console.log(`Created session: ${sessionId}`);
+    console.log(`Created session: ${sessionId} by admin: ${createdBy} (${adminId})`);
     return sessionData;
   }
 
@@ -151,15 +154,18 @@ export class SessionManager {
   /**
    * Add client to session
    */
-  addClient(sessionId: string, socketId: string, preferredLanguage: TargetLanguage, audioCapabilities?: AudioCapabilities): boolean {
+  addClient(sessionId: string, clientId: string, socketId: string, preferredLanguage: TargetLanguage, audioCapabilities?: AudioCapabilities): boolean {
     const session = this.sessions.get(sessionId);
     if (!session) {
       return false;
     }
 
     const clientData: ClientData = {
+      clientId,
       socketId,
       preferredLanguage,
+      connectedAt: new Date(),
+      lastActivity: new Date(),
       joinedAt: new Date(),
       lastSeen: new Date(),
       audioCapabilities: audioCapabilities || {
@@ -269,10 +275,10 @@ export class SessionManager {
     
     // Aggregate client TTS capabilities
     const ttsCapabilities = {
-      supportsPolly: clients.some(c => c.audioCapabilities.supportsPolly),
-      supportsLocal: clients.some(c => c.audioCapabilities.localTTSLanguages.length > 0),
+      supportsPolly: clients.some(c => c.audioCapabilities?.supportsPolly),
+      supportsLocal: clients.some(c => (c.audioCapabilities?.localTTSLanguages.length || 0) > 0),
       supportedLanguages: Array.from(new Set(
-        clients.flatMap(c => c.audioCapabilities.localTTSLanguages)
+        clients.flatMap(c => c.audioCapabilities?.localTTSLanguages || [])
       )) as TargetLanguage[]
     };
 
@@ -323,20 +329,74 @@ export class SessionManager {
   }
 
   /**
-   * Update admin socket ID for session
+   * Update current admin socket ID for session (for reconnection)
    */
-  updateAdminSocket(sessionId: string, adminSocketId: string): boolean {
+  updateCurrentAdminSocket(sessionId: string, adminSocketId: string): boolean {
     const session = this.sessions.get(sessionId);
     if (!session) {
       return false;
     }
 
-    session.adminSocketId = adminSocketId;
+    session.currentAdminSocketId = adminSocketId;
     session.lastActivity = new Date();
     this.persistSession(session);
     
-    console.log(`Updated admin socket for session: ${sessionId}`);
+    console.log(`Updated current admin socket for session: ${sessionId}`);
     return true;
+  }
+
+  /**
+   * Verify admin access to a session
+   * @param sessionId - The session to check access for
+   * @param adminId - The admin requesting access
+   * @param operation - The type of operation ('read' or 'write')
+   * @returns true if access is granted, false otherwise
+   */
+  verifyAdminAccess(sessionId: string, adminId: string, operation: 'read' | 'write'): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return false;
+    }
+
+    // Read access: all admins can view all sessions
+    if (operation === 'read') {
+      return true;
+    }
+
+    // Write access: only the session owner can modify
+    if (operation === 'write') {
+      return session.adminId === adminId;
+    }
+
+    return false;
+  }
+
+  /**
+   * Get all sessions owned by a specific admin
+   * @param adminId - The admin ID to filter by
+   * @returns Array of sessions owned by the admin
+   */
+  getSessionsByAdmin(adminId: string): SessionData[] {
+    return Array.from(this.sessions.values())
+      .filter(session => session.adminId === adminId);
+  }
+
+  /**
+   * Get session ownership information
+   * @param sessionId - The session to check
+   * @returns Object with ownership details or null if session not found
+   */
+  getSessionOwnership(sessionId: string): { adminId: string; createdBy: string; currentAdminSocketId: string | null } | null {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return null;
+    }
+
+    return {
+      adminId: session.adminId,
+      createdBy: session.createdBy,
+      currentAdminSocketId: session.currentAdminSocketId
+    };
   }
 
   /**
@@ -377,6 +437,54 @@ export class SessionManager {
     }
   }
 
+  /**
+   * Migrate old session files to new format
+   * Converts adminSocketId to adminId and currentAdminSocketId
+   */
+  migrateOldSessionFiles(): void {
+    try {
+      const files = readdirSync(this.persistenceDir);
+      let migratedCount = 0;
+      let errorCount = 0;
+
+      for (const file of files) {
+        if (file.endsWith('.json')) {
+          try {
+            const filePath = join(this.persistenceDir, file);
+            const data = JSON.parse(readFileSync(filePath, 'utf8'));
+            
+            // Check if this is an old format session (has adminSocketId but not adminId)
+            if (data.adminSocketId && !data.adminId) {
+              console.log(`Migrating old session file: ${file}`);
+              
+              // Create a system admin identity for orphaned sessions
+              data.adminId = 'system';
+              data.currentAdminSocketId = null; // No current connection
+              data.createdBy = 'system';
+              
+              // Remove old field
+              delete data.adminSocketId;
+              
+              // Write back the migrated data
+              writeFileSync(filePath, JSON.stringify(data, null, 2));
+              migratedCount++;
+              console.log(`Migrated session: ${data.sessionId}`);
+            }
+          } catch (error) {
+            console.error(`Failed to migrate session from ${file}:`, error);
+            errorCount++;
+          }
+        }
+      }
+
+      if (migratedCount > 0) {
+        console.log(`Migration complete: ${migratedCount} sessions migrated, ${errorCount} errors`);
+      }
+    } catch (error) {
+      console.error('Failed to migrate old session files:', error);
+    }
+  }
+
   // Private methods for persistence
 
   private ensurePersistenceDir(): void {
@@ -404,7 +512,7 @@ export class SessionManager {
 
   private loadPersistedSessions(): void {
     try {
-      const files = require('fs').readdirSync(this.persistenceDir);
+      const files = readdirSync(this.persistenceDir);
       
       for (const file of files) {
         if (file.endsWith('.json')) {
@@ -412,11 +520,22 @@ export class SessionManager {
             const filePath = join(this.persistenceDir, file);
             const data = JSON.parse(readFileSync(filePath, 'utf8'));
             
+            // Skip if this is still old format (shouldn't happen after migration)
+            if (data.adminSocketId && !data.adminId) {
+              console.warn(`Skipping old format session: ${file}`);
+              continue;
+            }
+            
             // Reconstruct the session with Map for clients
             const session: SessionData = {
-              ...data,
+              sessionId: data.sessionId,
+              adminId: data.adminId,
+              currentAdminSocketId: data.currentAdminSocketId || null,
+              createdBy: data.createdBy || 'unknown',
+              config: data.config,
               createdAt: new Date(data.createdAt),
               lastActivity: new Date(data.lastActivity),
+              status: data.status,
               clients: new Map(data.clients.map(([id, client]: [string, any]) => [
                 id,
                 {
@@ -428,7 +547,7 @@ export class SessionManager {
             };
             
             this.sessions.set(session.sessionId, session);
-            console.log(`Loaded persisted session: ${session.sessionId}`);
+            console.log(`Loaded persisted session: ${session.sessionId} (admin: ${session.createdBy})`);
           } catch (error) {
             console.error(`Failed to load session from ${file}:`, error);
           }
@@ -443,7 +562,7 @@ export class SessionManager {
     try {
       const filePath = this.getSessionFilePath(sessionId);
       if (existsSync(filePath)) {
-        require('fs').unlinkSync(filePath);
+        unlinkSync(filePath);
       }
     } catch (error) {
       console.error(`Failed to delete persisted session ${sessionId}:`, error);

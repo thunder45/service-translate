@@ -58,6 +58,15 @@ export interface WebSocketConfig {
   reconnectDelay: number;
 }
 
+interface AdminAuthState {
+  isAuthenticated: boolean;
+  adminId: string | null;
+  username: string | null;
+  token: string | null;
+  refreshToken: string | null;
+  tokenExpiry: Date | null;
+}
+
 export class WebSocketManager extends EventEmitter {
   private socket: Socket | null = null;
   private config: WebSocketConfig;
@@ -68,6 +77,7 @@ export class WebSocketManager extends EventEmitter {
   private healthCheckTimer: NodeJS.Timeout | null = null;
   private connectionHealth: ConnectionHealthStatus;
   private sessionStateBackup: SessionConfig | null = null;
+  private adminAuthState: AdminAuthState;
 
   constructor(config: WebSocketConfig) {
     super();
@@ -83,6 +93,165 @@ export class WebSocketManager extends EventEmitter {
         textOnly: true
       }
     };
+    this.adminAuthState = {
+      isAuthenticated: false,
+      adminId: null,
+      username: null,
+      token: null,
+      refreshToken: null,
+      tokenExpiry: null
+    };
+  }
+
+  /**
+   * Admin authentication with credentials
+   */
+  async adminAuthenticate(username: string, password: string): Promise<any> {
+    if (!this.isConnected || !this.socket) {
+      throw new Error('Not connected to WebSocket server');
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Admin authentication timeout'));
+      }, 10000);
+
+      this.socket!.once('admin-auth-response', (response: any) => {
+        clearTimeout(timeout);
+        
+        if (response.success) {
+          this.adminAuthState = {
+            isAuthenticated: true,
+            adminId: response.adminId,
+            username: response.username,
+            token: response.token,
+            refreshToken: response.refreshToken,
+            tokenExpiry: response.tokenExpiry ? new Date(response.tokenExpiry) : null
+          };
+          
+          resolve({
+            success: true,
+            adminId: response.adminId,
+            username: response.username,
+            token: response.token,
+            refreshToken: response.refreshToken,
+            tokenExpiry: response.tokenExpiry,
+            ownedSessions: response.ownedSessions,
+            allSessions: response.allSessions,
+            permissions: response.permissions
+          });
+        } else {
+          reject(new Error(response.error || 'Authentication failed'));
+        }
+      });
+
+      this.socket!.emit('admin-auth', {
+        type: 'admin-auth',
+        method: 'credentials',
+        username,
+        password,
+        clientInfo: {
+          appVersion: '1.0.0',
+          platform: process.platform,
+          deviceId: 'electron-capture-app'
+        }
+      });
+    });
+  }
+
+  /**
+   * Admin authentication with token
+   */
+  async adminAuthenticateWithToken(token: string): Promise<any> {
+    if (!this.isConnected || !this.socket) {
+      throw new Error('Not connected to WebSocket server');
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Token authentication timeout'));
+      }, 10000);
+
+      this.socket!.once('admin-auth-response', (response: any) => {
+        clearTimeout(timeout);
+        
+        if (response.success) {
+          this.adminAuthState = {
+            isAuthenticated: true,
+            adminId: response.adminId,
+            username: response.username,
+            token: response.token || token,
+            refreshToken: response.refreshToken,
+            tokenExpiry: response.tokenExpiry ? new Date(response.tokenExpiry) : null
+          };
+          
+          resolve({
+            success: true,
+            adminId: response.adminId,
+            username: response.username,
+            token: response.token || token,
+            refreshToken: response.refreshToken,
+            tokenExpiry: response.tokenExpiry,
+            ownedSessions: response.ownedSessions,
+            allSessions: response.allSessions,
+            permissions: response.permissions
+          });
+        } else {
+          reject(new Error(response.error || 'Token authentication failed'));
+        }
+      });
+
+      this.socket!.emit('admin-auth', {
+        type: 'admin-auth',
+        method: 'token',
+        token,
+        clientInfo: {
+          appVersion: '1.0.0',
+          platform: process.platform,
+          deviceId: 'electron-capture-app'
+        }
+      });
+    });
+  }
+
+  /**
+   * Refresh admin token
+   */
+  async refreshAdminToken(refreshToken: string, adminId: string): Promise<any> {
+    if (!this.isConnected || !this.socket) {
+      throw new Error('Not connected to WebSocket server');
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Token refresh timeout'));
+      }, 10000);
+
+      this.socket!.once('token-refresh-response', (response: any) => {
+        clearTimeout(timeout);
+        
+        if (response.success) {
+          this.adminAuthState.token = response.token;
+          this.adminAuthState.refreshToken = response.refreshToken || refreshToken;
+          this.adminAuthState.tokenExpiry = response.tokenExpiry ? new Date(response.tokenExpiry) : null;
+          
+          resolve({
+            success: true,
+            token: response.token,
+            refreshToken: response.refreshToken,
+            tokenExpiry: response.tokenExpiry
+          });
+        } else {
+          reject(new Error(response.error || 'Token refresh failed'));
+        }
+      });
+
+      this.socket!.emit('token-refresh', {
+        type: 'token-refresh',
+        refreshToken,
+        adminId
+      });
+    });
   }
 
   /**
@@ -511,6 +680,40 @@ export class WebSocketManager extends EventEmitter {
     this.socket.on('session-error', (error) => {
       this.emit('session-error', error);
     });
+
+    // Handle admin authentication events
+    this.socket.on('admin-reconnection', (notification) => {
+      console.log('Admin reconnection notification:', notification);
+      this.emit('admin-reconnected', notification);
+    });
+
+    this.socket.on('token-expiry-warning', (warning) => {
+      console.log('Token expiry warning:', warning);
+      this.emit('token-expiry-warning', warning);
+    });
+
+    this.socket.on('session-expired', (notification) => {
+      console.log('Session expired:', notification);
+      this.adminAuthState.isAuthenticated = false;
+      this.emit('session-expired', notification);
+    });
+
+    this.socket.on('admin-error', (error) => {
+      console.error('Admin error:', error);
+      this.emit('admin-error', error);
+    });
+
+    this.socket.on('admin-status-update', (status) => {
+      this.emit('admin-status-update', status);
+    });
+
+    this.socket.on('session-status-update', (update) => {
+      this.emit('session-status-update', update);
+    });
+
+    this.socket.on('list-sessions-response', (response) => {
+      this.emit('sessions-list-updated', response);
+    });
   }
 
   private handleServerMessage(message: any): void {
@@ -565,6 +768,19 @@ export class WebSocketManager extends EventEmitter {
    * Recover session state after reconnection
    */
   private async recoverSessionState(): Promise<void> {
+    // If admin is authenticated, try to re-authenticate with token
+    if (this.adminAuthState.isAuthenticated && this.adminAuthState.token) {
+      try {
+        console.log('Re-authenticating admin after reconnection...');
+        await this.adminAuthenticateWithToken(this.adminAuthState.token);
+        console.log('Admin re-authenticated successfully');
+      } catch (error) {
+        console.error('Failed to re-authenticate admin:', error);
+        this.adminAuthState.isAuthenticated = false;
+        this.emit('admin-auth-failed', error);
+      }
+    }
+
     if (this.sessionStateBackup) {
       try {
         console.log('Recovering session state after reconnection...');
@@ -582,5 +798,19 @@ export class WebSocketManager extends EventEmitter {
         this.emit('session-recovery-failed', error);
       }
     }
+  }
+
+  /**
+   * Get admin authentication state
+   */
+  getAdminAuthState(): AdminAuthState {
+    return { ...this.adminAuthState };
+  }
+
+  /**
+   * Check if admin is authenticated
+   */
+  isAdminAuthenticated(): boolean {
+    return this.adminAuthState.isAuthenticated;
   }
 }

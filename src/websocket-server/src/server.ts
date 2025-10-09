@@ -8,6 +8,12 @@ import { AudioManager } from './audio-manager';
 import { ServerErrorLogger } from './error-logger';
 import { SecurityMiddleware, SecurityConfig } from './security-middleware';
 import { PollyService } from './polly-service';
+import { AdminIdentityStore } from './admin-identity-store';
+import { AdminIdentityManager, JWTConfig } from './admin-identity-manager';
+import { AuthManager, AuthConfig } from './auth-manager';
+import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const app = express();
 const server = createServer(app);
@@ -18,6 +24,44 @@ const errorLogger = new ServerErrorLogger();
 // Initialize session manager and audio manager
 const sessionManager = new SessionManager();
 const audioManager = new AudioManager();
+
+// Initialize JWT secret (generate if not exists)
+const JWT_SECRET_PATH = path.join(__dirname, '..', '.jwt-secret');
+let jwtSecret: string;
+
+if (fs.existsSync(JWT_SECRET_PATH)) {
+  jwtSecret = fs.readFileSync(JWT_SECRET_PATH, 'utf-8').trim();
+} else {
+  // Generate 256-bit random secret
+  jwtSecret = crypto.randomBytes(32).toString('hex');
+  fs.writeFileSync(JWT_SECRET_PATH, jwtSecret, { mode: 0o600 });
+  console.log('Generated new JWT secret');
+}
+
+// Initialize JWT configuration
+const jwtConfig: JWTConfig = {
+  secret: jwtSecret,
+  algorithm: 'HS256',
+  issuer: 'service-translate-ws',
+  audience: 'service-translate-admin',
+  accessTokenExpiry: process.env.JWT_ACCESS_TOKEN_EXPIRY || '1h',
+  refreshTokenExpiry: process.env.JWT_REFRESH_TOKEN_EXPIRY || '30d'
+};
+
+// Initialize Auth Manager
+const authConfig: AuthConfig = {
+  enabled: process.env.ENABLE_AUTH === 'true',
+  username: process.env.AUTH_USERNAME,
+  password: process.env.AUTH_PASSWORD,
+  sessionTimeout: 24 * 60 * 60 * 1000 // 24 hours
+};
+const authManager = new AuthManager(authConfig);
+
+// Initialize Admin Identity Store and Manager
+const adminIdentityStore = new AdminIdentityStore(
+  path.join(__dirname, '..', 'admin-identities')
+);
+const adminIdentityManager = new AdminIdentityManager(adminIdentityStore, jwtConfig);
 
 // Initialize Polly service (optional)
 const pollyService = new PollyService({
@@ -83,8 +127,8 @@ const io = new SocketIOServer(server, {
   }
 });
 
-// Initialize message router with audio manager and error logger
-const messageRouter = new MessageRouter(io, sessionManager, audioManager, errorLogger);
+// Initialize message router with all dependencies
+const messageRouter = new MessageRouter(io, sessionManager, authManager, adminIdentityManager, audioManager, errorLogger);
 
 const PORT = process.env.PORT || 3001;
 
@@ -195,16 +239,59 @@ io.on('connection', (socket) => {
   console.log(`User agent: ${socket.handshake.headers['user-agent']}`);
   
   let securityContext: any = null;
+  let adminIdentity: any = null;
+  let isAdminConnection = false;
   
   try {
     // Authenticate connection
     securityContext = securityMiddleware.authenticateConnection(socket);
     
+    // Check if this is an admin connection with token
+    const authHeader = socket.handshake.auth?.token || socket.handshake.headers?.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7);
+      try {
+        // Attempt to register admin connection with token
+        adminIdentity = adminIdentityManager.registerAdminConnectionWithToken(token, socket.id);
+        isAdminConnection = true;
+        console.log(`Admin authenticated with token: ${adminIdentity.username} (${adminIdentity.adminId})`);
+        
+        // Schedule token expiry warning
+        const tokenExpiry = adminIdentityManager.getTokenExpiry(token);
+        if (tokenExpiry) {
+          adminIdentityManager.scheduleExpiryWarning(
+            adminIdentity.adminId,
+            tokenExpiry,
+            (adminId, expiresAt, timeRemaining) => {
+              // Send expiry warning to all admin sockets
+              adminIdentityManager.notifyAdminConnections(adminId, (socketId) => {
+                const targetSocket = io.sockets.sockets.get(socketId);
+                if (targetSocket) {
+                  targetSocket.emit('token-expiry-warning', {
+                    type: 'token-expiry-warning',
+                    adminId,
+                    expiresAt: expiresAt.toISOString(),
+                    timeRemaining,
+                    timestamp: new Date().toISOString()
+                  });
+                }
+              });
+            }
+          );
+        }
+      } catch (tokenError) {
+        console.log(`Token authentication failed: ${tokenError instanceof Error ? tokenError.message : 'Unknown error'}`);
+        // Token authentication failed, but connection can continue for credential-based auth
+      }
+    }
+    
     // Log connection
     errorLogger.logConnection('connect', socket.id, {
       userAgent: socket.handshake.headers['user-agent'],
       remoteAddress: socket.handshake.address,
-      authenticated: securityContext.isAuthenticated
+      authenticated: securityContext.isAuthenticated,
+      isAdmin: isAdminConnection,
+      adminId: adminIdentity?.adminId
     });
     
     // Send welcome message
@@ -213,7 +300,10 @@ io.on('connection', (socket) => {
       socketId: socket.id,
       timestamp: new Date().toISOString(),
       authenticated: securityContext.isAuthenticated,
-      securityEnabled: securityConfig.auth.enabled
+      securityEnabled: securityConfig.auth.enabled,
+      isAdmin: isAdminConnection,
+      adminId: adminIdentity?.adminId,
+      username: adminIdentity?.username
     });
   } catch (error) {
     console.error(`Connection rejected for ${socket.id}:`, error);
@@ -250,6 +340,30 @@ io.on('connection', (socket) => {
       }
     };
   };
+
+  // Admin authentication message handler
+  socket.on('admin-auth', secureMessageHandler('admin-auth', (data) => {
+    console.log(`[${socket.id}] ← admin-auth:`, JSON.stringify({ ...data, password: data.password ? '***' : undefined }, null, 2));
+    messageRouter.routeMessage(socket, 'admin-auth', data);
+  }));
+
+  // Token refresh message handler
+  socket.on('token-refresh', secureMessageHandler('token-refresh', (data) => {
+    console.log(`[${socket.id}] ← token-refresh`);
+    messageRouter.routeMessage(socket, 'token-refresh', data);
+  }));
+
+  // Admin session access message handler
+  socket.on('admin-session-access', secureMessageHandler('admin-session-access', (data) => {
+    console.log(`[${socket.id}] ← admin-session-access:`, JSON.stringify(data, null, 2));
+    messageRouter.routeMessage(socket, 'admin-session-access', data);
+  }));
+
+  // Update session config message handler (admin operation)
+  socket.on('update-session-config', secureMessageHandler('update-session-config', (data) => {
+    console.log(`[${socket.id}] ← update-session-config:`, JSON.stringify(data, null, 2));
+    messageRouter.routeMessage(socket, 'update-session-config', data);
+  }));
 
   // Route all message types through the message router with security
   socket.on('start-session', secureMessageHandler('start-session', (data) => {
@@ -382,11 +496,31 @@ io.on('connection', (socket) => {
   socket.on('disconnect', (reason) => {
     console.log(`=== CLIENT DISCONNECTED: ${socket.id} ===`);
     console.log(`Reason: ${reason}`);
-    errorLogger.logConnection('disconnect', socket.id, { reason });
+    
+    // Get admin identity before cleanup
+    const disconnectingAdmin = adminIdentityManager.getAdminBySocketId(socket.id);
+    
+    errorLogger.logConnection('disconnect', socket.id, { 
+      reason,
+      isAdmin: !!disconnectingAdmin,
+      adminId: disconnectingAdmin?.adminId
+    });
     
     // Handle security cleanup
     if (securityContext) {
       securityMiddleware.handleDisconnect(securityContext);
+    }
+    
+    // Clean up admin connection
+    if (disconnectingAdmin) {
+      console.log(`Cleaning up admin connection: ${disconnectingAdmin.username} (${disconnectingAdmin.adminId})`);
+      adminIdentityManager.removeAdminConnection(socket.id);
+      
+      // Check if admin has other active connections
+      const hasOtherConnections = adminIdentityManager.hasActiveConnections(disconnectingAdmin.adminId);
+      if (!hasOtherConnections) {
+        console.log(`Admin ${disconnectingAdmin.username} has no more active connections`);
+      }
     }
     
     messageRouter.handleDisconnection(socket, reason);
@@ -432,6 +566,9 @@ app.get('/security', (req, res) => {
 // Graceful shutdown
 const gracefulShutdown = () => {
   console.log('Shutting down gracefully...');
+  
+  // Cleanup admin identity manager
+  adminIdentityManager.cleanup();
   
   // Cleanup security middleware
   securityMiddleware.destroy();

@@ -33,6 +33,9 @@ class WebSocketServerStarter {
       console.log(`   - Local IP: ${networkInfo.localIp}`);
       console.log(`   - WebSocket URL: ${networkInfo.websocketUrl}`);
       console.log(`   - HTTP URL: ${networkInfo.httpUrl}`);
+      
+      // Check admin authentication setup
+      this.checkAdminSetup(serverDir);
 
       // Check if server directory exists
       const serverDir = path.join(process.cwd(), 'src', 'websocket-server');
@@ -117,6 +120,47 @@ class WebSocketServerStarter {
         }
       });
     });
+  }
+
+  private checkAdminSetup(serverDir: string): void {
+    const fs = require('fs');
+    const envPath = path.join(serverDir, '.env');
+    
+    if (!fs.existsSync(envPath)) {
+      console.log('\n⚠️  Warning: .env file not found!');
+      console.log('   Run setup script: cd src/websocket-server && ./setup-admin.sh');
+      return;
+    }
+    
+    const envContent = fs.readFileSync(envPath, 'utf-8');
+    const adminPassword = envContent.match(/^ADMIN_PASSWORD=(.*)$/m)?.[1];
+    const jwtSecret = envContent.match(/^JWT_SECRET=(.*)$/m)?.[1];
+    
+    if (!adminPassword || adminPassword.trim() === '') {
+      console.log('\n⚠️  Warning: Admin password not configured!');
+      console.log('   Run setup script: cd src/websocket-server && ./setup-admin.sh');
+    }
+    
+    if (!jwtSecret || jwtSecret.trim() === '') {
+      console.log('\n⚠️  Warning: JWT secret not configured!');
+      console.log('   Run setup script: cd src/websocket-server && ./setup-admin.sh');
+    }
+    
+    // Check if admin identities directory exists
+    const adminDir = envContent.match(/^ADMIN_IDENTITIES_DIR=(.*)$/m)?.[1] || './admin-identities';
+    const adminDirPath = path.join(serverDir, adminDir);
+    if (!fs.existsSync(adminDirPath)) {
+      console.log(`\n📁 Creating admin identities directory: ${adminDir}`);
+      fs.mkdirSync(adminDirPath, { recursive: true });
+    }
+    
+    // Check if sessions directory exists
+    const sessionDir = envContent.match(/^SESSION_PERSISTENCE_DIR=(.*)$/m)?.[1] || './sessions';
+    const sessionDirPath = path.join(serverDir, sessionDir);
+    if (!fs.existsSync(sessionDirPath)) {
+      console.log(`\n📁 Creating sessions directory: ${sessionDir}`);
+      fs.mkdirSync(sessionDirPath, { recursive: true });
+    }
   }
 
   private setupGracefulShutdown(): void {

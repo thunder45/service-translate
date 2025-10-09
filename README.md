@@ -158,9 +158,23 @@ npm run deploy
 ```bash
 cd src/websocket-server
 npm install
-./setup-tts.sh  # Interactive configuration
+
+# Setup admin authentication (REQUIRED)
+./setup-admin.sh  # Interactive admin credential setup
+
+# Setup TTS configuration (optional)
+./setup-tts.sh  # Interactive TTS configuration
 # Or manually: cp .env.example .env && nano .env
 ```
+
+**Admin Authentication Setup:**
+The TTS server now requires admin authentication for session management. The `setup-admin.sh` script will:
+- Create admin credentials (username/password)
+- Generate JWT secret for secure token-based authentication
+- Create necessary directories for admin identity persistence
+- Configure session persistence settings
+
+**Important:** Keep your `.env` file secure and never commit it to version control.
 
 ### 4. Setup Capture App
 ```bash

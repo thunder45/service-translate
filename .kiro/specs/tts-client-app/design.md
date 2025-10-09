@@ -259,7 +259,9 @@ class LocalTTSService {
 ```typescript
 interface SessionData {
   sessionId: string;
-  adminSocketId: string;
+  adminId: string;                    // Persistent admin owner
+  currentAdminSocketId: string | null; // Current admin connection
+  createdBy: string;                  // Username for display
   config: SessionConfig;
   clients: Map<string, ClientData>;
   createdAt: Date;

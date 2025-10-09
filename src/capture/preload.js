@@ -6,11 +6,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveConfig: (config) => ipcRenderer.invoke('save-config', config),
   getAudioDevices: () => ipcRenderer.invoke('get-audio-devices'),
   
-  // Authentication
+  // Authentication (legacy Cognito)
   checkStoredCredentials: () => ipcRenderer.invoke('check-stored-credentials'),
   login: (credentials) => ipcRenderer.invoke('login', credentials),
   logout: () => ipcRenderer.invoke('logout'),
   changePassword: (credentials) => ipcRenderer.invoke('change-password', credentials),
+  
+  // Admin authentication
+  adminAuthenticate: (credentials) => ipcRenderer.invoke('admin-authenticate', credentials),
+  adminAuthenticateWithToken: (data) => ipcRenderer.invoke('admin-authenticate-with-token', data),
+  refreshAdminToken: (data) => ipcRenderer.invoke('refresh-admin-token', data),
+  storeAdminTokens: (data) => ipcRenderer.invoke('store-admin-tokens', data),
+  loadStoredAdminTokens: () => ipcRenderer.invoke('load-stored-admin-tokens'),
+  clearAdminTokens: () => ipcRenderer.invoke('clear-admin-tokens'),
   
   // Local streaming
   startLocalStreaming: () => ipcRenderer.invoke('start-local-streaming'),

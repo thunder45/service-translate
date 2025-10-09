@@ -1,11 +1,13 @@
 // Local WebSocket Server Types
 // Extends shared types for local session management
 
+import { SessionConfig, TargetLanguage } from '../../shared/types';
+
 // Re-export needed types from shared
-export type TargetLanguage = 'en' | 'fr' | 'es' | 'de' | 'it';
+export { TargetLanguage };
 export type SessionStatus = 'started' | 'active' | 'paused' | 'ending' | 'ended' | 'error';
 
-export interface SessionConfig {
+export interface SessionRuntimeConfig {
   sessionId: string;
   enabledLanguages: TargetLanguage[];
   ttsMode: 'neural' | 'standard' | 'local' | 'disabled';
@@ -30,7 +32,9 @@ export interface AudioCapabilities {
 
 export interface SessionData {
   sessionId: string;
-  adminSocketId: string | null;
+  adminId: string;                    // Persistent admin owner
+  currentAdminSocketId: string | null; // Current admin connection
+  createdBy: string;                  // Username for display
   config: SessionConfig;
   clients: Map<string, ClientData>;
   createdAt: Date;

@@ -132,7 +132,8 @@ export class TTSService {
       'es': 'es-ES',
       'fr': 'fr-FR',
       'de': 'de-DE',
-      'it': 'it-IT'
+      'it': 'it-IT',
+      'pt': 'pt-BR'
     };
     return languageMap[language];
   }

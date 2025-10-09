@@ -260,6 +260,79 @@ ipcMain.handle('logout', async () => {
   return { success: true };
 });
 
+// Admin authentication handlers
+ipcMain.handle('admin-authenticate', async (_, credentials: { username: string; password: string }) => {
+  try {
+    if (!webSocketManager) {
+      throw new Error('WebSocket manager not initialized. Please connect to server first.');
+    }
+
+    const result = await webSocketManager.adminAuthenticate(credentials.username, credentials.password);
+    return result;
+  } catch (error: any) {
+    console.error('Admin authentication error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('admin-authenticate-with-token', async (_, data: { token: string }) => {
+  try {
+    if (!webSocketManager) {
+      throw new Error('WebSocket manager not initialized. Please connect to server first.');
+    }
+
+    const result = await webSocketManager.adminAuthenticateWithToken(data.token);
+    return result;
+  } catch (error: any) {
+    console.error('Admin token authentication error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('refresh-admin-token', async (_, data: { refreshToken: string; adminId: string }) => {
+  try {
+    if (!webSocketManager) {
+      throw new Error('WebSocket manager not initialized');
+    }
+
+    const result = await webSocketManager.refreshAdminToken(data.refreshToken, data.adminId);
+    return result;
+  } catch (error: any) {
+    console.error('Token refresh error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('store-admin-tokens', async (_, data: AdminTokenData) => {
+  try {
+    storeAdminTokensSecurely(data);
+    return { success: true };
+  } catch (error: any) {
+    console.error('Failed to store admin tokens:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('load-stored-admin-tokens', async () => {
+  try {
+    const tokens = loadStoredAdminTokens();
+    return tokens;
+  } catch (error: any) {
+    console.error('Failed to load stored admin tokens:', error);
+    return null;
+  }
+});
+
+ipcMain.handle('clear-admin-tokens', async () => {
+  try {
+    clearStoredAdminTokens();
+    return { success: true };
+  } catch (error: any) {
+    console.error('Failed to clear admin tokens:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('login', async (_, credentials) => {
   if (!cognitoAuth) {
     cognitoAuth = new CognitoAuth({
@@ -597,7 +670,57 @@ ipcMain.handle('stop-websocket-server', async () => {
   }
 });
 
-// Token storage helpers
+// Admin token storage helpers
+interface AdminTokenData {
+  token: string;
+  refreshToken: string;
+  tokenExpiry: string;
+  adminId: string;
+  username: string;
+  timestamp: number;
+}
+
+function storeAdminTokensSecurely(data: AdminTokenData): void {
+  if (safeStorage.isEncryptionAvailable()) {
+    const encrypted = safeStorage.encryptString(JSON.stringify({ ...data, timestamp: Date.now() }));
+    const tokenPath = path.join(app.getPath('userData'), 'admin-tokens.dat');
+    fs.writeFileSync(tokenPath, encrypted);
+  }
+}
+
+function loadStoredAdminTokens(): AdminTokenData | null {
+  try {
+    const tokenPath = path.join(app.getPath('userData'), 'admin-tokens.dat');
+    if (!fs.existsSync(tokenPath)) return null;
+    
+    if (safeStorage.isEncryptionAvailable()) {
+      const encrypted = fs.readFileSync(tokenPath);
+      const decrypted = safeStorage.decryptString(encrypted);
+      const data: AdminTokenData = JSON.parse(decrypted);
+      
+      // Check if token is not too old (within 24 hours)
+      if (Date.now() - data.timestamp < 24 * 60 * 60 * 1000) {
+        return data;
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load stored admin tokens:', error);
+  }
+  return null;
+}
+
+function clearStoredAdminTokens(): void {
+  try {
+    const tokenPath = path.join(app.getPath('userData'), 'admin-tokens.dat');
+    if (fs.existsSync(tokenPath)) {
+      fs.unlinkSync(tokenPath);
+    }
+  } catch (error) {
+    console.error('Failed to clear stored admin tokens:', error);
+  }
+}
+
+// Token storage helpers (legacy Cognito)
 function saveAuthToken(token: string, config: any) {
   if (safeStorage.isEncryptionAvailable()) {
     const encrypted = safeStorage.encryptString(JSON.stringify({ token, config, timestamp: Date.now() }));

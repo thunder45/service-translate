@@ -18,22 +18,41 @@ src/shared/
 
 ### Core Types
 - **ConnectionType**: `'admin' | 'client'` - User connection types
-- **SourceLanguage**: `'pt' | 'en' | 'es' | 'fr' | 'de' | 'it'` - Supported source languages
-- **TargetLanguage**: `'en' | 'fr' | 'es' | 'de' | 'it' | 'pt'` - Supported translation languages
+- **SourceLanguage**: `'pt' | 'en' | 'es' | 'fr' | 'de' | 'it'` - Supported source languages (Portuguese, English, Spanish, French, German, Italian)
+- **TargetLanguage**: `'en' | 'fr' | 'es' | 'de' | 'it' | 'pt'` - Supported translation languages (English, French, Spanish, German, Italian, Portuguese)
 - **AudioEncoding**: `'pcm' | 'opus' | 'flac'` - Audio format options
 - **SessionStatus**: Session state management types
-- **MessageType**: Event and message categorization
+- **MessageType**: Event and message categorization (includes admin message types)
+
+### Admin Authentication Types
+- **AdminIdentity**: Persistent admin identity with UUID, username, and session ownership
+- **AdminPermissions**: Granular permission system for admin operations
+- **AdminConnectionContext**: Admin connection state and authentication context
+- **SessionData**: Enhanced session data with persistent admin ownership (replaces adminSocketId)
+- **SessionConfig**: Comprehensive session configuration interface
+- **ClientData**: Client connection and preference data
+
+### Admin Message Protocol Types
+- **AdminAuthMessage/AdminAuthResponse**: Authentication flow messages
+- **StartSessionMessage/StartSessionResponseMessage**: Session creation messages
+- **ListSessionsMessage/ListSessionsResponse**: Session listing and management
+- **UpdateSessionConfigMessage/UpdateSessionConfigResponse**: Configuration updates
+- **TokenRefreshMessage/TokenRefreshResponse**: JWT token management
+- **AdminErrorMessage**: Structured error responses with user-friendly messages
+
+### Error Handling System
+- **AdminErrorCode**: Comprehensive enum with 25+ specific error codes
+- **ERROR_MESSAGES**: User-friendly error message mappings with retry strategies
+- **RetryStrategy**: Client-side retry configuration for error recovery
 
 ### Configuration Interfaces
 - **AudioConfig**: Audio capture configuration
-- **StreamingConfig**: Direct streaming parameters
 - **TranslationRequest**: Translation service requests
 - **TranslationResponse**: Translation service responses
 
 ### Authentication Types
 - **ConnectQueryParams**: Connection parameter structure
 - **ConnectionResponse**: Connection establishment responses
-- **AuthenticationConfig**: Cognito authentication settings
 
 ## Usage
 
@@ -43,13 +62,15 @@ These types are imported and used throughout the application:
 import { TargetLanguage, AudioConfig, StreamingConfig } from '../shared/types';
 ```
 
-## Local Architecture Focus
+## Architecture Support
 
-The types in this directory reflect the current **local-only architecture**:
+The types in this directory support both **local and persistent admin session architecture**:
 - Direct AWS service integration types
 - Local audio processing configurations
-- Simplified authentication structures
-- No WebSocket or server-specific types needed
+- **Persistent admin authentication with JWT tokens**
+- **WebSocket message protocol types for admin session management**
+- **Comprehensive error handling and retry strategies**
+- **Session ownership and admin identity management**
 
 ## Type Safety
 
