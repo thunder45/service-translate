@@ -39,7 +39,14 @@ export class DirectStreamingManager extends EventEmitter {
   private audioCache: Map<string, string> = new Map(); // Cache for generated audio URLs
 
   private mapToTargetLanguages(languages: string[]): TargetLanguage[] {
-    return languages.map(lang => `${lang}-${lang.toUpperCase()}` as TargetLanguage);
+    const languageMap: Record<string, TargetLanguage> = {
+      'en': 'en-US',
+      'es': 'es-ES',
+      'fr': 'fr-FR',
+      'de': 'de-DE',
+      'it': 'it-IT'
+    };
+    return languages.map(lang => languageMap[lang] || `${lang}-${lang.toUpperCase()}` as TargetLanguage);
   }
 
   constructor(config: StreamingConfig, webSocketManager?: WebSocketManager | null) {
@@ -61,7 +68,7 @@ export class DirectStreamingManager extends EventEmitter {
       userPoolId: config.userPoolId,
       jwtToken: config.jwtToken,
       sourceLanguage: config.sourceLanguage,
-      targetLanguages: config.targetLanguages,
+      targetLanguages: this.mapToTargetLanguages(config.targetLanguages),
     });
 
     this.audioCapture = new AudioCapture({
