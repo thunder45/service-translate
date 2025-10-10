@@ -74,11 +74,13 @@ export class ServiceTranslateStack extends cdk.Stack {
       }),
     });
 
-    // Grant direct access to Transcribe and Translate
+    // Grant direct access to Transcribe, Translate, and Polly
     authenticatedRole.addToPolicy(new iam.PolicyStatement({
       actions: [
         'transcribe:StartStreamTranscription',
         'translate:TranslateText',
+        'polly:SynthesizeSpeech',
+        'polly:DescribeVoices',
       ],
       resources: ['*'],
     }));

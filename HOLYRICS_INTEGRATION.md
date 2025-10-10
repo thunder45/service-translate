@@ -112,8 +112,8 @@ io.on('connection', (socket) => {
     
     // Send primary language translation to Holyrics
     // Configure which language to display on the big screen
-    const holyricksLanguage = 'pt'; // Portuguese for the big screen
-    const holyricksText = translations[holyricksLanguage] || text;
+    const holyricsLanguage = config.holyrics.language; // Configured display language
+    const holyricsText = translations[holyricsLanguage] || text;
     
     try {
       await sendToHolyrics(holyricksText);
@@ -202,7 +202,7 @@ const holyricsManager = new HolyricsManager(HOLYRICS_CONFIG);
 socket.on('transcription', async (data) => {
   if (data.isFinal) {
     // Translate...
-    const translatedText = translations['pt']; // Portuguese for big screen
+    const translatedText = translations[config.holyrics.language]; // Configured display language
     
     // Send to Holyrics
     await holyricsManager.addTranscription(translatedText);
@@ -276,14 +276,14 @@ const holyrics = {
 io.on('connection', (socket) => {
   socket.on('finalTranscription', async (data) => {
     // 1. Translate
-    const portugueseTranslation = await translateText(data.text, 'pt');
+    const displayTranslation = await translateText(data.text, config.holyrics.language);
     
     // 2. Send to Holyrics big screen
-    await holyrics.send(portugueseTranslation);
+    await holyrics.send(displayTranslation);
     
     // 3. Broadcast to all connected viewers
     io.emit('transcriptionUpdate', {
-      text: portugueseTranslation,
+      text: displayTranslation,
       timestamp: Date.now()
     });
   });

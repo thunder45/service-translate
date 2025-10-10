@@ -1,241 +1,404 @@
-# Service Translate - Local macOS Audio Translation Application
+# Capture App
 
-**Production-ready Electron app with direct AWS streaming and comprehensive audio device support.**
+Cross-platform Electron application for real-time audio capture, transcription, and translation.
 
-## Features ✅
+## Features
 
-- **Comprehensive audio device enumeration** - All macOS input devices via system_profiler
-- **Real-time VU meter** - 20-bar audio level visualization with gradient colors  
-- **Direct AWS Transcribe Streaming** - Real-time Portuguese speech-to-text
-- **Direct AWS Translate** - Multi-language translation (EN, ES, FR, DE, IT)
-- **Tabbed configuration interface** - Connection and Audio settings separated
-- **Secure credential storage** - Encrypted with 24-hour auto-expiration
-- **Enter key login support** - Improved authentication UX
-- **Logout functionality** - Secure credential clearing
+- **Audio Capture**: Real-time microphone input with device selection
+- **AWS Transcribe**: Streaming speech-to-text (configurable source language)
+- **AWS Translate**: Multi-language translation (configurable target languages)
+- **Holyrics Integration**: Optional display on church screens
+- **WebSocket Client**: Sends translations to TTS Server
+- **Session Management**: Independent session lifecycle control
+- **Cost Tracking**: Real-time monitoring of AWS service costs
+- **Cross-Platform**: Windows 10/11 and macOS 10.15+
 
-## Quick Setup
+## Architecture
 
+### Separation of Concerns
+
+**Streaming** and **Session Management** are completely independent:
+
+```
+Streaming Layer (Audio Processing):
+Microphone → Audio Capture → Transcribe → Translate → Local Display
+                                                      ↓
+                                                  [Holyrics]
+
+Session Layer (Broadcasting):
+WebSocket Manager → TTS Server → Connected Clients
+```
+
+**Valid State Combinations:**
+- ❌ No Streaming + ❌ No Session: Initial state
+- ❌ No Streaming + ✅ Session Active: Session ready, waiting to stream
+- ✅ Streaming + ❌ No Session: Local-only transcription/translation
+- ✅ Streaming + ✅ Session Active: Full operation with client broadcasting
+
+See [SESSION_STREAMING_SEPARATION.md](../../SESSION_STREAMING_SEPARATION.md) for details.
+
+## Quick Start
+
+### macOS
 ```bash
-cd src/capture
-./setup.sh      # Installs dependencies and sox
-npm run dev     # Launches the app
+./setup.sh
+npm start
 ```
 
-## First Time Configuration
+### Windows
+```powershell
+.\setup-windows.ps1
+npm start
+```
 
-### 1. Get Backend Information
-After deploying the minimal backend, you'll have:
-- **User Pool ID**: `us-east-1_ABC123DEF`
-- **Client ID**: `1a2b3c4d5e6f7g8h9i0j`
-- **Identity Pool ID**: `us-east-1:abc-123-def`
-- **Region**: `us-east-1`
+## Configuration
 
-### 2. Create Admin User (One-time)
+### Admin Authentication
+
+The Capture app now uses **persistent admin authentication** to manage sessions across reconnections.
+
+#### First-Time Setup
+1. Start the Capture app
+2. Connect to the WebSocket server (it will auto-start if not running)
+3. Enter admin credentials:
+   - **Username**: Your admin username (e.g., "admin")
+   - **Password**: Your admin password
+4. Click "Login"
+
+#### Authentication Features
+- **Persistent Sessions**: Your admin identity persists across reconnections
+- **Token Management**: Automatic token refresh before expiry
+- **Session Recovery**: Reconnect and regain control of your sessions
+- **Secure Storage**: Tokens encrypted using Electron safeStorage
+- **Expiry Warnings**: 5-minute warning before session expires
+
+#### Admin Identity Display
+After successful authentication:
+- Admin username displayed in header
+- Admin ID shown (first 8 characters)
+- Logout button available in top-right corner
+
+#### Session Ownership
+- **My Sessions**: View and manage sessions you created
+- **All Sessions**: View all active sessions (read-only for others' sessions)
+- **Ownership Indicators**: 
+  - 👤 OWNER badge for your sessions
+  - 👁️ READ-ONLY badge for other admins' sessions
+
+### AWS Credentials (Legacy)
+For backward compatibility with Cognito authentication:
+1. Click "Settings"
+2. Configure tabs:
+   - **Languages**: Select source language and target languages
+   - **Audio**: Configure input device and audio settings
+   - **TTS**: Set TTS mode and WebSocket server URL
+   - **Holyrics**: Optional church display integration
+   - **Advanced**: AWS credentials (Region, User Pool ID, Identity Pool ID)
+3. Click "Save"
+4. Login with Username/Password
+
+### TTS Server
+```typescript
+{
+  tts: {
+    mode: 'neural',              // 'neural' | 'standard' | 'local' | 'disabled'
+    host: 'localhost',           // TTS server host
+    port: 3001                   // TTS server port
+  }
+}
+```
+
+### Language Configuration
+```typescript
+{
+  sourceLanguage: 'pt',          // Source language code
+  targetLanguages: ['en', 'es', 'fr', 'de', 'it']  // Target language codes
+}
+```
+
+### Holyrics (Optional)
+```typescript
+{
+  holyrics: {
+    enabled: true,
+    host: 'localhost',
+    port: 8080,
+    language: 'en'
+  }
+}
+```
+
+## Usage
+
+### 1. Start Capture App
 ```bash
-cd ../backend
-./create-admin.sh admin@example.com <UserPoolId>
+npm start
 ```
 
-### 3. Configure the App
-1. **Launch app**: `npm run dev`
-2. **Click "⚙️ Configuration"** button to open tabbed settings
-3. **Connection Tab**: Enter AWS authentication details
-4. **Audio Tab**: Select your preferred audio input device
-5. **Save configuration**
+### 2. Admin Authentication
+- Enter admin username and password
+- Click "Login"
+- Your admin identity will be displayed in the header
+- Tokens are stored securely for automatic reconnection
 
-### 4. Login and Use
-1. **Login** with your username and password (Enter key supported)
-2. **First login**: You'll be prompted to change the temporary password
-3. **Select audio device** from the dropdown (includes Bluetooth devices)
-4. **Click "🎤 Start Local Streaming"**
-5. **Monitor VU meter** for audio level confirmation
-6. **Speak Portuguese** and see real-time translations in language tabs
-
-## Local Architecture Benefits
-
-### Direct AWS Integration
-- **No server infrastructure** - Direct SDK connections to AWS services
-- **Cost optimized** - Only pay for AWS Transcribe/Translate usage
-- **Unlimited duration** - No Lambda timeout restrictions
-- **Lower latency** - Direct connection without server intermediaries
-
-### Audio Device Management
-- **Automatic detection** - All macOS audio input devices enumerated
-- **Device selection** - Real-time switching between input devices
-- **Bluetooth support** - Wireless headsets and microphones
-- **USB support** - External microphones and audio interfaces
-- **Built-in support** - MacBook Pro internal microphone
-
-## Technical Implementation
-
-### Audio Capture Pipeline
-```typescript
-// Device enumeration using system_profiler
-system_profiler SPAudioDataType → Parse devices with input channels → sox integration
-
-// Real-time audio capture with device selection
-sox -t coreaudio "device_name" → PCM audio stream → AWS Transcribe Streaming
+### 3. Start TTS Server (Auto-starts)
+The WebSocket server will automatically start when you connect.
+Manual start:
+```bash
+cd ../websocket-server
+npm start
 ```
 
-### Direct AWS Streaming
-```typescript
-// Direct Transcribe connection
-TranscribeStreamingClient → Real-time Portuguese transcription
+### 4. Session Management
+**Create a New Session:**
+- Enter session ID (e.g., "CHURCH-2025-001")
+- Click "Create Session"
+- Session will be owned by your admin identity
 
-// Direct Translate connection  
-TranslateClient → Multi-language translation (EN, ES, FR, DE, IT)
+**View Sessions:**
+- Click "My Sessions" to see sessions you created
+- Click "All Sessions" to see all active sessions
+- Owner sessions show 👤 OWNER badge
+- Other sessions show 👁️ READ-ONLY badge
 
-// Local display
-IPC events → UI updates → Language tabs
-```
+**Manage Sessions:**
+- Reconnect to your sessions after disconnection
+- End sessions you own
+- View (read-only) sessions created by other admins
 
-### User Interface Features
-- **Tabbed Configuration**: Connection settings and Audio device selection
-- **VU Meter**: Real-time 20-bar audio level visualization
-- **Language Tabs**: Clean translation display (EN, ES, FR, DE, IT)
-- **Enter Key Login**: Improved authentication experience
-- **Logout Button**: Secure credential clearing with door/arrow icon
+### 5. Start Streaming
+- Select microphone
+- Click "Start"
+- Speak in configured source language
+- Translations sent to TTS Server and connected clients
 
-### File Structure
-```
-src/capture/
-├── src/
-│   ├── main.ts                      # Electron main process with device enumeration
-│   ├── direct-streaming-manager.ts  # Local orchestration without server
-│   ├── direct-transcribe-client.ts  # Direct AWS Transcribe connection
-│   ├── translation-service.ts       # Direct AWS Translate integration
-│   ├── audio-capture.ts            # Real audio capture via sox
-│   ├── auth.ts                     # Cognito authentication
-│   └── config.ts                   # Configuration management
-├── index.html                      # Local UI with tabbed interface
-├── preload.js                      # Electron IPC bridge
-└── dist/                          # Compiled JavaScript
-```
+### 6. Token Management
+- Tokens automatically refresh 2 minutes before expiry
+- Warning shown 5 minutes before expiry
+- Click "Refresh" to manually extend session
+- Logout to clear tokens and disconnect
 
-## Current Implementation Details
+## Features
 
-### Core Components ✅
+### Audio Capture
+- Device selection
+- VU meter
+- Automatic gain control
+- Cross-platform support (sox on macOS, native on Windows)
 
-#### main.ts - Electron Main Process
-- **Audio device enumeration** using `system_profiler SPAudioDataType`
-- **Device parsing** to extract actual device names with input channels
-- **Secure credential storage** using Electron's safeStorage API
-- **24-hour credential expiration** with automatic cleanup
-- **IPC event handling** for UI communication
+### Transcription
+- Real-time streaming
+- Configurable source language
+- Partial and final results
+- Automatic timeout handling
 
-#### direct-streaming-manager.ts - Local Orchestration
-- **DirectTranscribeClient integration** for real-time transcription
-- **TranslationService integration** for multi-language translation
-- **AudioCapture coordination** with selected device
-- **Event emission** for UI updates
-- **Error handling and recovery** for stream timeouts
+### Translation
+- 5 target languages (EN, ES, FR, DE, IT)
+- Batch translation
+- Cost tracking
+- Error handling
 
-#### direct-transcribe-client.ts - AWS Transcribe Integration
-- **Real-time streaming** to AWS Transcribe Streaming
-- **Portuguese language configuration** with proper encoding
-- **Chunk-based audio processing** for optimal performance
-- **Automatic stream recovery** on timeouts or errors
+### Cost Tracking
+- Real-time cost calculation
+- Per-service breakdown
+- Configurable limits
+- Warning notifications
 
-#### translation-service.ts - AWS Translate Integration
-- **Direct AWS Translate calls** for multi-language support
-- **Batch translation optimization** for multiple target languages
-- **Language code mapping** (EN, ES, FR, DE, IT)
-- **Error handling** for translation failures
-
-#### audio-capture.ts - Real Audio Processing
-- **sox command-line integration** for macOS CoreAudio
-- **Device-specific audio capture** using coreaudio:N format
-- **PCM audio stream generation** for AWS Transcribe
-- **Real-time audio level monitoring** for VU meter
-
-#### auth.ts - Cognito Authentication
-- **Cognito User Pool authentication** with JWT tokens
-- **Identity Pool integration** for direct AWS service access
-- **Temporary credential management** with automatic refresh
-- **Password change handling** for first-time login
-
-### User Interface ✅
-
-#### Tabbed Configuration Interface
-- **Connection Tab**: AWS authentication settings (User Pool, Client ID, Identity Pool, Region)
-- **Audio Tab**: Device selection with real-time enumeration
-- **Clean separation** of configuration concerns
-- **Persistent settings** saved to local configuration
-
-#### Real-time Translation Display
-- **Language tabs** for clean translation organization (EN, ES, FR, DE, IT)
-- **VU meter visualization** with 20-bar gradient display
-- **Audio level monitoring** for input confirmation
-- **Streaming status indicators** for connection health
-
-#### Authentication Flow
-- **Login form** with username/password fields
-- **Enter key support** for improved UX
-- **Password change prompts** for first-time users
-- **Logout functionality** with secure credential clearing
-
-## Requirements
-
-- **macOS** (tested on macOS 10.15+)
-- **Node.js 20+**
-- **sox** (installed automatically by setup.sh)
-- **Microphone access** (granted on first use)
-
-## Troubleshooting
-
-### Audio Device Issues
-- **No devices shown**: Check microphone permissions in System Preferences
-- **Device not working**: Verify device has input channels in Audio MIDI Setup
-- **Bluetooth issues**: Ensure device is properly paired and connected
-- **VU meter not moving**: Check selected device and audio input level
-
-### Authentication Issues
-- **Login failed**: Check User Pool ID and Client ID configuration
-- **Token expired**: Credentials auto-expire after 24 hours, login again
-- **AWS access denied**: Verify Identity Pool and IAM role configuration
-
-### Streaming Issues
-- **No transcription**: Check internet connection and AWS service availability
-- **Translation errors**: Verify AWS Translate service permissions
-- **Audio timeout**: Normal behavior when no speech detected, will auto-recover
+### Holyrics Integration
+- Automatic text display
+- Language selection
+- Error recovery
+- Optional feature
 
 ## Development
 
-### Build from Source
+### Run in Development Mode
 ```bash
-npm install
-npm run build    # Compile TypeScript
-npm run dev      # Run in development mode
+npm run dev
 ```
 
-### Key Implementation Files
+### Build for Production
+```bash
+# macOS
+npm run build:mac
 
-#### Audio Device Management
-- **system_profiler integration** - Comprehensive device enumeration
-- **CoreAudio device mapping** - Proper sox device ID generation  
-- **Real-time device selection** - Dynamic switching without restart
+# Windows
+npm run build:win
+```
 
-#### Direct AWS Streaming
-- **Cognito Identity Pool** - Direct AWS service access
-- **Transcribe Streaming** - Real-time speech-to-text
-- **Translate Service** - Multi-language translation
-- **Error recovery** - Automatic stream restart on timeouts
+### Run Tests
+```bash
+npm test
+```
 
-#### User Interface
-- **Tabbed configuration** - Clean separation of settings
-- **VU meter visualization** - Real-time audio feedback
-- **Language tabs** - Clean translation display
-- **Responsive design** - Adapts to different screen sizes
+## Troubleshooting
 
-## Production Deployment
+### Admin Authentication Issues
 
-This local application is **production-ready** and includes:
-- ✅ Real audio capture with comprehensive device support
-- ✅ Direct AWS service integration (no server required)
-- ✅ Professional UI with tabbed interface and VU meter
-- ✅ Secure authentication and credential management
-- ✅ Cost-optimized architecture (60-80% savings vs server)
-- ✅ Unlimited streaming duration
-- ✅ Automatic error recovery and timeout handling
+**Cannot Login:**
+1. Verify WebSocket server is running
+2. Check admin credentials are correct
+3. Ensure server is accessible (default: localhost:3001)
+4. Check server logs for authentication errors
 
-Perfect for **individual users, personal translation needs, and small group settings** requiring real-time audio translation without server infrastructure complexity.
+**Session Expired:**
+1. Click "Refresh" when warning appears
+2. If refresh fails, logout and login again
+3. Check token expiry settings on server
+4. Verify system clock is accurate
+
+**Lost Session Control:**
+1. Logout and login again to re-authenticate
+2. Check "My Sessions" tab to see your sessions
+3. Verify admin identity matches session owner
+4. Contact administrator if session ownership is incorrect
+
+**Token Refresh Failed:**
+1. Logout and login with credentials
+2. Check network connectivity
+3. Verify refresh token hasn't expired
+4. Check server logs for token validation errors
+
+### Audio Not Capturing
+**macOS:**
+1. Install sox: `brew install sox`
+2. Grant microphone permissions
+3. Check device selection
+
+**Windows:**
+1. Grant microphone permissions
+2. Check device selection
+3. Verify audio drivers
+
+### Transcription Not Working
+1. Verify AWS credentials
+2. Check internet connection
+3. Confirm Transcribe service access
+4. Review IAM permissions
+
+### Translation Not Working
+1. Verify AWS credentials
+2. Check Translate service access
+3. Review IAM permissions
+4. Check cost limits
+
+### TTS Server Connection Failed
+1. Verify server is running
+2. Check WebSocket URL
+3. Confirm network connectivity
+4. Review firewall settings
+
+### Holyrics Not Displaying
+1. Verify Holyrics is running
+2. Check host and port
+3. Confirm API is enabled
+4. Test connection manually
+
+### Session Management Issues
+
+**Cannot Create Session:**
+1. Verify you are authenticated as admin
+2. Check session ID is unique
+3. Ensure WebSocket connection is active
+4. Review server logs for errors
+
+**Cannot End Session:**
+1. Verify you own the session (👤 OWNER badge)
+2. Check WebSocket connection is active
+3. Try refreshing session list
+4. Contact administrator if session is stuck
+
+**Sessions Not Appearing:**
+1. Click "Refresh" button
+2. Check WebSocket connection status
+3. Switch between "My Sessions" and "All Sessions" tabs
+4. Verify admin authentication is active
+
+## Cost Management
+
+### Typical Service Costs (2-hour service, 60 min speaking)
+- **Transcribe**: $1.44 (60 min × $0.024/min)
+- **Translate**: $3.38 (45K chars × 5 langs × $15/1M)
+- **Total**: ~$4.82 (without TTS)
+
+### Cost Controls
+1. Set cost limits in app
+2. Monitor real-time usage
+3. Disable unused languages
+4. Use local TTS mode
+
+## Security
+
+### Admin Token Storage
+- **Encryption**: Tokens encrypted using Electron safeStorage
+- **Storage Location**: OS-specific secure storage (Keychain on macOS, Credential Manager on Windows)
+- **Auto-Expiration**: Tokens expire after configured time (default: 1 hour)
+- **Refresh Tokens**: Longer-lived tokens for automatic renewal (default: 30 days)
+- **Secure Transmission**: Tokens never logged or transmitted in plain text
+
+### Admin Authentication Security
+- **JWT Tokens**: Industry-standard JSON Web Tokens for authentication
+- **Token Rotation**: Automatic token refresh before expiry
+- **Session Isolation**: Each admin has isolated session ownership
+- **Audit Trail**: All admin actions logged on server
+- **Rate Limiting**: Protection against brute-force attacks
+
+### Credential Storage (Legacy AWS)
+- Encrypted using Electron safeStorage
+- Stored in OS keychain
+- Auto-expiration after 24 hours
+- Never logged or transmitted
+
+### Best Practices
+1. **Admin Credentials**:
+   - Use strong, unique passwords
+   - Never share admin credentials
+   - Logout when not in use
+   - Monitor session activity
+   
+2. **AWS Credentials** (if using):
+   - Use dedicated AWS user
+   - Rotate credentials regularly
+   - Set IAM permissions to minimum
+   - Monitor AWS CloudTrail logs
+
+3. **Network Security**:
+   - Use secure WebSocket connections (WSS) in production
+   - Restrict server access to trusted networks
+   - Enable firewall rules
+   - Monitor connection logs
+
+## Performance
+
+### System Requirements
+- **CPU**: 2+ cores recommended
+- **RAM**: 4GB minimum, 8GB recommended
+- **Network**: Stable internet for AWS services
+- **Audio**: USB microphone recommended
+
+### Optimization
+- Close unnecessary applications
+- Use wired network connection
+- Position microphone properly
+- Monitor CPU/memory usage
+
+## Known Issues
+
+### macOS
+- Requires sox installation
+- Microphone permissions prompt
+- First launch may be slow
+
+### Windows
+- Audio device enumeration delay
+- Firewall prompts on first run
+- Antivirus may flag unsigned build
+
+## Support
+
+For issues:
+1. Check application logs
+2. Verify AWS credentials
+3. Test network connectivity
+4. Review error messages
+5. Check AWS service status

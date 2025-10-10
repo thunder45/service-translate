@@ -1,0 +1,17 @@
+{
+  "name": "service-translate-client",
+  "version": "1.0.0",
+  "description": "Progressive Web Application client for Service Translate TTS",
+  "main": "index.html",
+  "scripts": {
+    "start": "python3 -m http.server 8080",
+    "serve": "python3 -m http.server 8080"
+  },
+  "keywords": ["pwa", "translation", "tts", "websocket"],
+  "author": "Service Translate",
+  "license": "MIT",
+  "dependencies": {
+    "socket.io-client": "^4.7.2"
+  },
+  "devDependencies": {}
+}

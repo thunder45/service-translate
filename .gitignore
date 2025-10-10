@@ -24,3 +24,15 @@ Thumbs.db
 dist/
 build/
 *.log
+
+# Logs
+logs/
+*.log
+
+
+# WebSocket Server Runtime Files
+src/websocket-server/sessions/*.json
+src/websocket-server/audio-cache/
+src/websocket-server/.jwt-secret
+src/websocket-server/data/
+src/websocket-server/admin-identities/

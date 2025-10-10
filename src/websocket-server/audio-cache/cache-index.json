@@ -1,0 +1,15 @@
+{
+  "97fd8011ba89d76638fa81916badafde": {
+    "id": "97fd8011ba89d76638fa81916badafde",
+    "text": "Hello, this is a test translation",
+    "language": "en",
+    "voiceType": "standard",
+    "format": "mp3",
+    "duration": 6.1,
+    "size": 13523,
+    "filePath": "audio-cache/97fd8011ba89d76638fa81916badafde.mp3",
+    "url": "http://localhost:3001/audio/97fd8011ba89d76638fa81916badafde.mp3",
+    "createdAt": "2025-10-07T13:50:59.082Z",
+    "lastAccessed": "2025-10-07T13:50:59.082Z"
+  }
+}
