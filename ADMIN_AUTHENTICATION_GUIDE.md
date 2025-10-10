@@ -1,10 +1,10 @@
 # Admin Authentication System Guide
 
-**Service Translate - Persistent Admin Session Management**
+**Service Translate - Unified Cognito Authentication**
 
 ## Overview
 
-The Admin Authentication System provides persistent admin identity management for the WebSocket server, allowing admins to reconnect and regain control of their previously created sessions. This solves the issue where admins would lose control of sessions after network disconnections or application restarts.
+The Admin Authentication System provides unified authentication using AWS Cognito as the single source of truth for admin identities. This eliminates the previous dual-authentication system and provides a streamlined, secure authentication experience for both AWS services and WebSocket server operations.
 
 ## Table of Contents
 
@@ -19,184 +19,248 @@ The Admin Authentication System provides persistent admin identity management fo
 
 ## Architecture Overview
 
-### Components
+### Unified Authentication Model
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                  Capture Electron App                    │
 │  ┌──────────────────────────────────────────────────┐  │
-│  │  Admin Authentication UI                         │  │
-│  │  - Login form (username/password)                │  │
-│  │  - Token storage and refresh                     │  │
-│  │  - Session recovery on reconnection              │  │
+│  │  Unified Cognito Authentication                  │  │
+│  │  - Single credential set                         │  │
+│  │  - AWS services + WebSocket operations          │  │
+│  │  - Encrypted token storage                       │  │
+│  │  - Automatic token refresh                       │  │
 │  └──────────────────┬───────────────────────────────┘  │
 └─────────────────────┼──────────────────────────────────┘
                       │
-                      │ WebSocket + JWT
+                      │ Cognito Tokens
                       │
-┌─────────────────────▼──────────────────────────────────┐
-│              WebSocket Server                           │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │  AdminIdentityManager                            │  │
-│  │  - Admin connection tracking                     │  │
-│  │  - Session ownership verification                │  │
-│  │  - JWT token generation/validation               │  │
-│  └──────────────────┬───────────────────────────────┘  │
-│                     │                                   │
-│  ┌──────────────────▼───────────────────────────────┐  │
-│  │  AdminIdentityStore (File-based)                 │  │
-│  │  - Persistent admin identities                   │  │
-│  │  - Session ownership tracking                    │  │
-│  │  - Token management                              │  │
-│  │  - Lifecycle management (90-day retention)       │  │
-│  └──────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
+         ┌────────────┴────────────┐
+         │                         │
+         ▼                         ▼
+  ┌─────────────┐          ┌─────────────┐
+  │ AWS Cognito │          │ WebSocket   │
+  │ User Pool   │          │ Server      │
+  │             │          │ (validates  │
+  │             │          │  Cognito)   │
+  └─────────────┘          └─────────────┘
 ```
+
+### Components
+
+**1. AWS Cognito User Pool**
+- Centralized user management
+- Password policies and MFA support
+- Token generation and validation
+- Account recovery and security
+
+**2. Cognito Authentication Service** (`cognito-auth.ts`)
+- Validates Cognito credentials
+- Authenticates using USER_PASSWORD_AUTH flow
+- Refreshes access tokens
+- Extracts user information from tokens
+
+**3. AdminIdentityManager** (`admin-identity-manager.ts`)
+- Manages admin connections
+- Tracks session ownership
+- Handles token validation
+- Supports multiple connections per admin
+
+**4. Secure Token Storage** (`secure-token-storage.ts`)
+- Encrypts tokens using Electron safeStorage
+- Persists tokens across app restarts
+- Automatic cleanup on logout
 
 ### Data Flow
 
 1. **Initial Authentication:**
-   - Admin enters credentials in Capture app
+   - Admin enters Cognito credentials in Capture app
    - Credentials sent to WebSocket server
-   - Server validates and creates/retrieves admin identity
-   - Server generates JWT access token and refresh token
-   - Tokens returned to client with session list
+   - Server validates against Cognito User Pool
+   - Cognito returns access, ID, and refresh tokens
+   - Tokens stored encrypted on client
+   - Admin gains access to both AWS services and sessions
 
 2. **Token-Based Reconnection:**
-   - Client reconnects with stored JWT token
-   - Server validates token and retrieves admin identity
-   - Server returns session list and updates connection
+   - Client reconnects with stored Cognito access token
+   - Server validates token against Cognito
+   - Server retrieves admin identity by Cognito sub
    - Admin regains control of owned sessions
 
-3. **Session Management:**
-   - Admin creates session → linked to admin identity
-   - Admin disconnects → session remains with admin identity
-   - Admin reconnects → session control restored
-   - Multiple connections → all can manage same admin's sessions
+3. **Automatic Token Refresh:**
+   - Client checks token expiry every 5 minutes
+   - If less than 10 minutes remaining, automatically refresh
+   - Use Cognito refresh token to get new access token
+   - Update stored tokens
+   - Continue operations without interruption
 
 ## Key Features
 
-### 1. Persistent Admin Identity
+### 1. Single Authentication Source
 
-Each admin is assigned a persistent UUID-based identifier that remains constant across connections:
+All admin operations use Cognito credentials:
+
+```typescript
+interface CognitoUserInfo {
+  sub: string;           // Cognito user ID (UUID) - persistent identifier
+  email: string;         // User email
+  username: string;      // Username
+  'cognito:groups'?: string[]; // User groups (for future RBAC)
+}
+```
+
+### 2. Persistent Admin Identity
+
+Admin identities are based on Cognito sub (UUID):
 
 ```typescript
 interface AdminIdentity {
-  adminId: string;           // UUID v4 persistent identifier
-  username: string;          // Display name (unique)
+  adminId: string;           // Cognito sub (UUID)
+  cognitoUsername: string;   // Cognito username
+  email: string;             // Cognito email
   createdAt: Date;
   lastSeen: Date;
   activeSockets: Set<string>; // Current connections
   ownedSessions: Set<string>; // Sessions created by admin
-  tokenVersion: number;       // For token invalidation
-  refreshTokens: Set<string>; // Active refresh tokens
+  cognitoGroups?: string[];  // Cognito groups for future RBAC
 }
 ```
 
-### 2. JWT-Based Authentication
+### 3. Cognito Token Management
 
 - **Access Tokens**: Short-lived (default: 1 hour) for API operations
+- **ID Tokens**: Contains user information
 - **Refresh Tokens**: Long-lived (default: 30 days) for obtaining new access tokens
-- **Token Expiry Warnings**: Sent 5 minutes before expiration
-- **Automatic Refresh**: Client can refresh tokens without re-authentication
+- **Automatic Refresh**: Client refreshes tokens proactively
+- **Expiry Warnings**: Not needed - client handles refresh automatically
 
-### 3. Session Ownership
+### 4. Session Ownership
 
-Sessions are permanently linked to the admin who created them:
+Sessions are permanently linked to the Cognito sub of the admin who created them:
 
 ```typescript
 interface SessionData {
   sessionId: string;
-  adminId: string;                    // Persistent admin owner
+  adminId: string;                    // Cognito sub (UUID)
   currentAdminSocketId: string | null; // Current connection
-  createdBy: string;                  // Username for display
+  createdBy: string;                  // Cognito username for display
   // ... other fields
 }
 ```
 
-### 4. Multi-Admin Support
+### 5. Multi-Admin Support
 
 - Multiple admins can connect simultaneously
 - Each admin can only manage their own sessions
 - All admins can view all sessions (read-only for others' sessions)
 - Multiple connections from same admin are supported
 
-### 5. File-Based Persistence
+### 6. Encrypted Token Storage
 
-Admin identities are stored in JSON files for persistence:
+Tokens are stored securely on the client:
 
-```
-./admin-identities/
-├── admin-index.json          # Username to adminId mapping
-├── {adminId}.json            # Individual admin identity files
-└── cleanup-log.json          # Cleanup operation log
+```typescript
+class SecureTokenStorage {
+  // Store tokens encrypted using Electron safeStorage
+  storeTokens(tokens: {
+    accessToken: string;
+    idToken: string;
+    refreshToken: string;
+    expiresAt: Date;
+  }): void;
+  
+  // Load and decrypt stored tokens
+  loadTokens(): TokenData | null;
+  
+  // Clear stored tokens
+  clearTokens(): void;
+}
 ```
 
 ## Setup and Configuration
 
-### 1. Initial Setup
+### 1. Deploy AWS Cognito Stack
 
-Run the admin setup script to configure credentials:
+```bash
+cd src/backend
+npm install
+cdk bootstrap  # First time only
+npm run deploy
+```
+
+Note the following from CDK output:
+- Cognito User Pool ID (e.g., `us-east-1_xxxxxx`)
+- Cognito Client ID (e.g., `xxxxxxxxxxxxxxxxxxxxxxxxxx`)
+- AWS Region (e.g., `us-east-1`)
+
+### 2. Run Unified Setup Script
 
 ```bash
 cd src/websocket-server
-./setup-admin.sh
+./setup-unified-auth.sh
 ```
 
 The script will:
-- Prompt for admin username (default: admin)
-- Prompt for admin password (minimum 8 characters)
-- Generate JWT secret (256-bit random)
+- Parse Cognito configuration from CDK output
+- Validate Cognito stack deployment
+- Generate `.env` file with Cognito values
 - Create admin identities directory
 - Create sessions directory
-- Update .env file with configuration
+- Optionally create a Cognito user
 
-### 2. Environment Configuration
+### 3. Environment Configuration
 
 Key environment variables in `.env`:
 
 ```bash
-# Admin Authentication
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=your-secure-password
+# Cognito Configuration (REQUIRED)
+COGNITO_REGION=us-east-1
+COGNITO_USER_POOL_ID=us-east-1_xxxxxx
+COGNITO_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# Admin Identity Persistence
 ADMIN_IDENTITIES_DIR=./admin-identities
 ADMIN_IDENTITY_CLEANUP_ENABLED=true
 ADMIN_IDENTITY_RETENTION_DAYS=90
-ADMIN_IDENTITY_CLEANUP_INTERVAL_MS=86400000
-
-# JWT Configuration
-JWT_SECRET=auto-generated-secret
-JWT_ALGORITHM=HS256
-JWT_ISSUER=service-translate-ws
-JWT_AUDIENCE=service-translate-admin
-JWT_ACCESS_TOKEN_EXPIRY=1h
-JWT_REFRESH_TOKEN_EXPIRY=30d
-JWT_TOKEN_EXPIRY_WARNING_MINUTES=5
-JWT_ENABLE_BLACKLIST=true
-JWT_BLACKLIST_CLEANUP_INTERVAL_MS=3600000
 
 # Session Configuration
 SESSION_PERSISTENCE_DIR=./sessions
 SESSION_TIMEOUT_MINUTES=480
 SESSION_CLEANUP_ENABLED=true
-SESSION_CLEANUP_INTERVAL_MS=3600000
 ```
 
-### 3. Data Migration
+### 4. Cognito User Pool Client Configuration
 
-If you have existing sessions from the old format, run the migration script:
+The Cognito User Pool Client must be configured with:
+
+- **Client Type**: Public client (no secret)
+- **Auth Flows**: 
+  - ALLOW_USER_PASSWORD_AUTH (enabled)
+  - ALLOW_REFRESH_TOKEN_AUTH (enabled)
+- **Token Expiry**:
+  - Access Token: 1 hour (default)
+  - ID Token: 1 hour (default)
+  - Refresh Token: 30 days (default)
+- **Read/Write Attributes**: email, preferred_username (minimum)
+
+### 5. Create Cognito Users
+
+Create admin users in Cognito User Pool:
 
 ```bash
-cd src/websocket-server
-./migrate-admin-sessions.sh
+# Using AWS CLI
+aws cognito-idp admin-create-user \
+  --user-pool-id us-east-1_xxxxxx \
+  --username admin@example.com \
+  --user-attributes Name=email,Value=admin@example.com \
+  --temporary-password TempPassword123!
+
+# Or use the setup script
+./setup-unified-auth.sh
+# Choose "Yes" when prompted to create a user
 ```
 
-The script will:
-- Backup existing session files
-- Convert old `adminSocketId` format to new `adminId` format
-- Create system admin identity for orphaned sessions
-- Generate migration log
-- Provide rollback instructions
+**Note**: All users in the Cognito User Pool have admin access to the WebSocket server.
 
 ## Admin Authentication Flow
 
@@ -207,24 +271,25 @@ The script will:
 {
   type: 'admin-auth',
   method: 'credentials',
-  username: 'admin',
+  username: 'admin@example.com',
   password: 'your-password',
   clientInfo: {
-    appVersion: '1.0.0',
+    appVersion: '2.0.0',
     platform: 'darwin',
     deviceId: 'unique-device-id'
   }
 }
 
-// Server responds with tokens and sessions
+// Server validates against Cognito and responds
 {
   type: 'admin-auth-response',
   success: true,
-  adminId: 'uuid-v4-admin-id',
-  username: 'admin',
-  token: 'jwt-access-token',
-  tokenExpiry: '2025-10-09T18:30:00.000Z',
-  refreshToken: 'jwt-refresh-token',
+  adminId: 'cognito-sub-uuid',
+  username: 'admin@example.com',
+  accessToken: 'cognito-access-token',
+  idToken: 'cognito-id-token',
+  refreshToken: 'cognito-refresh-token',
+  expiresIn: 3600,  // seconds
   ownedSessions: [...],  // Sessions owned by this admin
   allSessions: [...],    // All active sessions
   permissions: {
@@ -239,19 +304,19 @@ The script will:
 ### Token-Based Reconnection
 
 ```typescript
-// Client reconnects with stored token
+// Client reconnects with stored Cognito token
 {
   type: 'admin-auth',
   method: 'token',
-  token: 'stored-jwt-access-token'
+  accessToken: 'stored-cognito-access-token'
 }
 
-// Server validates and responds
+// Server validates token against Cognito and responds
 {
   type: 'admin-auth-response',
   success: true,
-  adminId: 'uuid-v4-admin-id',
-  username: 'admin',
+  adminId: 'cognito-sub-uuid',
+  username: 'admin@example.com',
   ownedSessions: [...],
   allSessions: [...]
 }
@@ -263,18 +328,36 @@ The script will:
 // Client requests token refresh
 {
   type: 'token-refresh',
-  refreshToken: 'stored-refresh-token',
-  adminId: 'uuid-v4-admin-id'
+  refreshToken: 'stored-cognito-refresh-token'
 }
 
-// Server responds with new tokens
+// Server uses Cognito to refresh and responds
 {
   type: 'token-refresh-response',
   success: true,
-  token: 'new-jwt-access-token',
-  tokenExpiry: '2025-10-09T19:30:00.000Z',
-  refreshToken: 'new-jwt-refresh-token'
+  accessToken: 'new-cognito-access-token',
+  expiresIn: 3600
 }
+```
+
+### Automatic Token Refresh (Client-Side)
+
+The Capture app automatically manages token refresh:
+
+```typescript
+// Check token expiry every 5 minutes
+setInterval(() => {
+  const tokens = secureTokenStorage.loadTokens();
+  if (!tokens) return;
+  
+  const timeRemaining = tokens.expiresAt.getTime() - Date.now();
+  const tenMinutes = 10 * 60 * 1000;
+  
+  // Refresh if less than 10 minutes remaining
+  if (timeRemaining < tenMinutes) {
+    refreshCognitoTokens();
+  }
+}, 5 * 60 * 1000);
 ```
 
 ## Session Management
@@ -282,7 +365,7 @@ The script will:
 ### Creating a Session
 
 ```typescript
-// Admin creates session (requires authentication)
+// Admin creates session (requires Cognito authentication)
 {
   type: 'start-session',
   sessionId: 'CHURCH-2025-001',
@@ -294,12 +377,12 @@ The script will:
   }
 }
 
-// Server creates session linked to admin
+// Server creates session linked to Cognito sub
 {
   type: 'start-session-response',
   success: true,
   sessionId: 'CHURCH-2025-001',
-  adminId: 'uuid-v4-admin-id',
+  adminId: 'cognito-sub-uuid',
   config: {...}
 }
 ```
@@ -308,8 +391,8 @@ The script will:
 
 The server automatically verifies admin ownership for all session operations:
 
-- **Create Session**: Automatically linked to authenticated admin
-- **End Session**: Only owner can end their sessions
+- **Create Session**: Automatically linked to authenticated admin's Cognito sub
+- **End Session**: Only owner (by Cognito sub) can end their sessions
 - **Update Config**: Only owner can modify session configuration
 - **View Session**: All admins can view, only owner can modify
 
@@ -317,12 +400,12 @@ The server automatically verifies admin ownership for all session operations:
 
 ```typescript
 // Admin A creates session
-Admin A → Server: start-session (CHURCH-001)
-Server: Links session to Admin A's identity
+Admin A (Cognito sub: abc-123) → Server: start-session (CHURCH-001)
+Server: Links session to Cognito sub abc-123
 
 // Admin B tries to end Admin A's session
-Admin B → Server: end-session (CHURCH-001)
-Server: ❌ Access denied - not session owner
+Admin B (Cognito sub: def-456) → Server: end-session (CHURCH-001)
+Server: ❌ Access denied - Cognito sub doesn't match session owner
 
 // Admin B can view session (read-only)
 Admin B → Server: list-sessions
@@ -331,26 +414,28 @@ Server: Returns all sessions with ownership indicators
 
 ## Security Considerations
 
-### 1. JWT Secret Management
+### 1. Cognito Security Benefits
 
-- **Generation**: 256-bit random secret generated on first run
-- **Storage**: Stored in `.env` file with restricted permissions (600)
-- **Rotation**: Configurable rotation policy (default: 90 days)
-- **Backup**: Keep secure backup for disaster recovery
+- **Centralized Security**: Cognito handles password policies, MFA, account recovery
+- **Token Management**: Cognito manages token lifecycle, rotation, revocation
+- **Audit Trail**: Cognito provides authentication logs and monitoring
+- **Scalability**: Cognito scales automatically with user base
+- **Compliance**: Cognito is SOC 2, ISO 27001, HIPAA compliant
 
-### 2. Password Security
-
-- **Minimum Length**: 8 characters required
-- **Storage**: Stored in `.env` file (consider hashing in production)
-- **Transmission**: Sent over encrypted WebSocket (WSS)
-- **Rate Limiting**: Failed authentication attempts are rate-limited
-
-### 3. Token Security
+### 2. Token Security
 
 - **Short-Lived Access Tokens**: Default 1 hour expiry
 - **Refresh Token Rotation**: New refresh token issued on each refresh
-- **Token Blacklist**: Revoked tokens are blacklisted
-- **Expiry Warnings**: Clients notified 5 minutes before expiry
+- **Encrypted Storage**: Tokens encrypted using Electron safeStorage
+- **Automatic Cleanup**: Tokens cleared on logout
+- **No Server Persistence**: Server stores tokens in memory only
+
+### 3. Network Security
+
+- **WSS Protocol**: Use encrypted WebSocket connections in production
+- **Server-Side Validation**: All tokens validated against Cognito
+- **Rate Limiting**: Authentication attempts are rate-limited
+- **Connection Limits**: Configurable max connections per admin
 
 ### 4. File Permissions
 
@@ -362,12 +447,12 @@ chmod 700 admin-identities/
 chmod 700 sessions/
 ```
 
-### 5. Network Security
+### 5. Cognito User Pool Security
 
-- **WSS Protocol**: Use encrypted WebSocket connections in production
-- **CORS**: Configure appropriate CORS policies
-- **Rate Limiting**: Enabled for authentication attempts
-- **Connection Limits**: Configurable max connections per admin
+- **Password Policy**: Configure strong password requirements
+- **MFA**: Enable multi-factor authentication for admin accounts
+- **Account Recovery**: Configure email/SMS recovery
+- **User Pool Monitoring**: Enable CloudWatch logging
 
 ## Troubleshooting
 
@@ -376,22 +461,25 @@ chmod 700 sessions/
 **Symptoms**: Authentication fails with invalid credentials
 
 **Solutions**:
-1. Verify credentials in `.env` file
-2. Check JWT secret is generated
-3. Review server logs for authentication errors
-4. Ensure admin identities directory exists and is writable
+1. Verify Cognito user exists in User Pool
+2. Check username and password are correct
+3. Verify User Pool Client configuration (public client, USER_PASSWORD_AUTH enabled)
+4. Check server logs for Cognito errors
+5. Verify Cognito configuration in `.env`
 
 ```bash
-# Check configuration
-cat src/websocket-server/.env | grep ADMIN
+# Check Cognito configuration
+cat src/websocket-server/.env | grep COGNITO
 
-# Verify directories
-ls -la src/websocket-server/admin-identities/
-ls -la src/websocket-server/sessions/
+# Verify Cognito user exists
+aws cognito-idp admin-get-user \
+  --user-pool-id us-east-1_xxxxxx \
+  --username admin@example.com
 
-# Re-run setup if needed
-cd src/websocket-server
-./setup-admin.sh
+# Check User Pool Client configuration
+aws cognito-idp describe-user-pool-client \
+  --user-pool-id us-east-1_xxxxxx \
+  --client-id xxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 ### Token Expired Errors
@@ -400,17 +488,15 @@ cd src/websocket-server
 
 **Solutions**:
 1. Client should automatically refresh token
-2. Check token expiry configuration
+2. Check token expiry configuration in Cognito
 3. Verify system clocks are synchronized
 4. Review refresh token validity
 
 ```bash
-# Check token configuration
-cat src/websocket-server/.env | grep JWT
-
-# Adjust expiry times if needed
-JWT_ACCESS_TOKEN_EXPIRY=2h  # Increase if needed
-JWT_REFRESH_TOKEN_EXPIRY=60d  # Increase if needed
+# Check Cognito token configuration
+aws cognito-idp describe-user-pool \
+  --user-pool-id us-east-1_xxxxxx \
+  --query 'UserPool.Policies.PasswordPolicy'
 ```
 
 ### Session Ownership Issues
@@ -418,70 +504,81 @@ JWT_REFRESH_TOKEN_EXPIRY=60d  # Increase if needed
 **Symptoms**: Admin cannot manage their own sessions
 
 **Solutions**:
-1. Check admin identity persistence
-2. Verify session files have correct adminId
-3. Run migration script if upgrading from old format
-4. Review session ownership in admin identity file
+1. Check admin identity uses Cognito sub
+2. Verify session files have correct adminId (Cognito sub)
+3. Review session ownership in admin identity file
+4. Ensure Cognito sub is consistent
 
 ```bash
 # Check admin identity
-cat src/websocket-server/admin-identities/{adminId}.json
+cat src/websocket-server/admin-identities/{cognito-sub}.json
 
 # Check session file
 cat src/websocket-server/sessions/{sessionId}.json
 
-# Run migration if needed
-cd src/websocket-server
-./migrate-admin-sessions.sh
+# Verify adminId matches Cognito sub
 ```
 
-### Multiple Connection Issues
+### Cognito Connection Issues
 
-**Symptoms**: Admin connections conflict or disconnect each other
-
-**Solutions**:
-1. Verify concurrent connection support is enabled
-2. Check socket ID tracking in AdminIdentityManager
-3. Review connection logs for conflicts
-4. Ensure proper cleanup on disconnect
-
-### File Persistence Errors
-
-**Symptoms**: Admin identities or sessions not persisting
+**Symptoms**: Server cannot connect to Cognito
 
 **Solutions**:
-1. Check directory permissions (should be 700)
-2. Verify disk space availability
-3. Review file locking errors in logs
-4. Check for corrupted JSON files
+1. Verify Cognito User Pool ID is correct
+2. Check AWS region is correct
+3. Verify network connectivity to Cognito
+4. Check Cognito User Pool exists and is active
 
 ```bash
-# Fix permissions
-chmod 700 src/websocket-server/admin-identities/
-chmod 700 src/websocket-server/sessions/
+# Test Cognito connectivity
+aws cognito-idp describe-user-pool \
+  --user-pool-id us-east-1_xxxxxx \
+  --region us-east-1
+```
 
-# Check disk space
-df -h
+### Token Storage Issues
 
-# Validate JSON files
-for file in src/websocket-server/admin-identities/*.json; do
-  echo "Checking $file"
-  node -e "JSON.parse(require('fs').readFileSync('$file', 'utf8'))"
-done
+**Symptoms**: Tokens not persisting across app restarts
+
+**Solutions**:
+1. Check Capture app has write permissions to app data directory
+2. Verify Electron safeStorage is available
+3. Check for file system errors in logs
+4. Ensure app data directory exists
+
+```bash
+# Check app data directory (macOS)
+ls -la ~/Library/Application\ Support/service-translate-capture/
+
+# Check app data directory (Windows)
+dir %APPDATA%\service-translate-capture\
 ```
 
 ## API Reference
 
 ### Admin Authentication Messages
 
-#### admin-auth (Request)
+#### admin-auth (Request - Credentials)
 ```typescript
 {
   type: 'admin-auth',
-  method: 'credentials' | 'token',
-  username?: string,      // Required for credentials method
-  password?: string,      // Required for credentials method
-  token?: string,         // Required for token method
+  method: 'credentials',
+  username: string,      // Cognito username or email
+  password: string,      // Cognito password
+  clientInfo?: {
+    appVersion: string,
+    platform: string,
+    deviceId: string
+  }
+}
+```
+
+#### admin-auth (Request - Token)
+```typescript
+{
+  type: 'admin-auth',
+  method: 'token',
+  accessToken: string,   // Cognito access token
   clientInfo?: {
     appVersion: string,
     platform: string,
@@ -495,11 +592,12 @@ done
 {
   type: 'admin-auth-response',
   success: boolean,
-  adminId?: string,
-  username?: string,
-  token?: string,
-  tokenExpiry?: string,
-  refreshToken?: string,
+  adminId?: string,           // Cognito sub (UUID)
+  username?: string,          // Cognito username
+  accessToken?: string,       // Cognito access token
+  idToken?: string,           // Cognito ID token
+  refreshToken?: string,      // Cognito refresh token
+  expiresIn?: number,         // Token expiry in seconds
   ownedSessions?: SessionSummary[],
   allSessions?: SessionSummary[],
   permissions?: AdminPermissions,
@@ -513,8 +611,7 @@ done
 ```typescript
 {
   type: 'token-refresh',
-  refreshToken: string,
-  adminId: string
+  refreshToken: string   // Cognito refresh token
 }
 ```
 
@@ -523,62 +620,24 @@ done
 {
   type: 'token-refresh-response',
   success: boolean,
-  token?: string,
-  tokenExpiry?: string,
-  refreshToken?: string,
+  accessToken?: string,  // New Cognito access token
+  expiresIn?: number,    // Token expiry in seconds
   error?: string
-}
-```
-
-#### token-expiry-warning (Server → Client)
-```typescript
-{
-  type: 'token-expiry-warning',
-  adminId: string,
-  expiresAt: string,
-  timeRemaining: number  // seconds
-}
-```
-
-### Session Management Messages
-
-#### start-session (Request)
-```typescript
-{
-  type: 'start-session',
-  sessionId: string,
-  config: SessionConfig
-}
-```
-
-#### end-session (Request)
-```typescript
-{
-  type: 'end-session',
-  sessionId: string,
-  reason?: string
-}
-```
-
-#### list-sessions (Request)
-```typescript
-{
-  type: 'list-sessions',
-  filter?: 'owned' | 'all'
 }
 ```
 
 ### Error Codes
 
-Common admin error codes:
+Common Cognito error codes:
 
-- `AUTH_1001`: Invalid credentials
-- `AUTH_1002`: Token expired
-- `AUTH_1003`: Token invalid
-- `AUTH_1007`: Rate limited
-- `AUTHZ_1102`: Session not owned
-- `SESSION_1201`: Session not found
-- `SYSTEM_1401`: Internal server error
+- `COGNITO_1001`: Invalid credentials
+- `COGNITO_1002`: Token expired
+- `COGNITO_1003`: Token invalid
+- `COGNITO_1004`: User not found
+- `COGNITO_1005`: User disabled
+- `COGNITO_1006`: Cognito unavailable
+- `COGNITO_1007`: Refresh token expired
+- `COGNITO_1008`: Insufficient permissions
 
 See `src/websocket-server/MESSAGE_PROTOCOLS.md` for complete error code reference.
 
@@ -587,14 +646,14 @@ See `src/websocket-server/MESSAGE_PROTOCOLS.md` for complete error code referenc
 ### For Administrators
 
 1. **Secure Credentials**: Use strong passwords (12+ characters)
-2. **Regular Backups**: Backup `.env` and admin identities directory
-3. **Monitor Logs**: Review authentication and session logs regularly
-4. **Update Tokens**: Allow automatic token refresh in client
-5. **Clean Sessions**: End sessions when no longer needed
+2. **Enable MFA**: Enable multi-factor authentication in Cognito
+3. **Regular Backups**: Backup admin identities and sessions directories
+4. **Monitor Logs**: Review authentication and session logs regularly
+5. **Update Tokens**: Allow automatic token refresh in client
 
 ### For Developers
 
-1. **Error Handling**: Implement comprehensive error handling for auth failures
+1. **Error Handling**: Implement comprehensive error handling for Cognito failures
 2. **Token Refresh**: Implement automatic token refresh before expiry
 3. **Reconnection Logic**: Handle reconnection with token-based auth
 4. **Session Recovery**: Restore session list on reconnection
@@ -608,17 +667,24 @@ See `src/websocket-server/MESSAGE_PROTOCOLS.md` for complete error code referenc
 4. **Backup Strategy**: Regular backups of admin identities and sessions
 5. **Disaster Recovery**: Document recovery procedures
 
+## Migration from v1.x
+
+See [CHANGELOG.md](CHANGELOG.md) for detailed migration instructions from the previous JWT-based authentication system to Cognito-based authentication.
+
 ## Additional Resources
 
 - [WebSocket Server README](src/websocket-server/README.md) - Server architecture and implementation
 - [Message Protocols](src/websocket-server/MESSAGE_PROTOCOLS.md) - Complete message protocol reference
 - [Security Implementation](src/websocket-server/SECURITY_IMPLEMENTATION.md) - Security details
-- [Implementation Summary](IMPLEMENTATION_SUMMARY.md) - Overall system implementation status
+- [Cognito Setup Guide](src/websocket-server/COGNITO_SETUP.md) - Cognito configuration details
+- [CHANGELOG.md](CHANGELOG.md) - Version history and breaking changes
 
 ## Support
 
 For issues or questions:
 1. Check troubleshooting section above
 2. Review server logs in `src/websocket-server/logs/`
-3. Check migration logs if upgrading
+3. Check Cognito User Pool configuration
 4. Review error codes in MESSAGE_PROTOCOLS.md
+5. Verify Cognito connectivity and configuration
+

@@ -331,10 +331,7 @@
         
         <div class="header">
             <h1>🎤 ADVM Service Translate</h1>
-            <div id="admin-identity-display" class="hidden" style="margin-top: 10px; padding: 8px 15px; background: rgba(255,255,255,0.15); border-radius: 8px; display: inline-block;">
-                <span style="font-size: 14px; font-weight: 500;">👤 Admin: <span id="admin-username-display">-</span></span>
-                <span style="margin-left: 15px; font-size: 12px; color: rgba(255,255,255,0.8);">ID: <span id="admin-id-display">-</span></span>
-            </div>
+
         </div>
 
         <!-- Configuration Panel -->
@@ -532,13 +529,13 @@
             <div class="login-form">
                 <div class="form-group">
                     <label>Username:</label>
-                    <input type="text" id="admin-username" placeholder="admin" onkeypress="handleAdminLoginKeyPress(event)" autocomplete="username">
+                    <input type="text" id="admin-username" placeholder="admin" autocomplete="username">
                 </div>
                 <div class="form-group">
                     <label>Password:</label>
-                    <input type="password" id="admin-password" placeholder="Enter password" onkeypress="handleAdminLoginKeyPress(event)" autocomplete="current-password">
+                    <input type="password" id="admin-password" placeholder="Enter password" autocomplete="current-password">
                 </div>
-                <button onclick="adminLogin()" id="admin-login-btn">🔑 Login</button>
+                <button id="admin-login-btn">🔑 Login</button>
                 <div style="margin-top: 15px; text-align: center; font-size: 12px; color: rgba(255,255,255,0.7);">
                     Authenticating will create a persistent admin session
                 </div>
@@ -632,7 +629,7 @@
                         <div id="current-session-id" style="font-size: 18px; font-weight: bold; color: #FFD700;">Not Connected</div>
                     </div>
                     <div style="text-align: right;">
-                        <button onclick="refreshSessions()" style="padding: 8px 15px; font-size: 12px;">🔄 Refresh</button>
+                        <button id="refresh-sessions-btn" onclick="refreshSessions()" style="padding: 8px 15px; font-size: 12px;" disabled>🔄 Refresh</button>
                     </div>
                 </div>
                 
@@ -662,7 +659,7 @@
                 <div style="display: flex; gap: 10px; align-items: center;">
                     <label for="sessionId" style="font-size: 14px; white-space: nowrap;">Session ID:</label>
                     <input type="text" id="sessionId" placeholder="Enter session ID" value="CHURCH-2025-001" style="flex: 1; padding: 8px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; color: white;">
-                    <button onclick="createSession()" id="create-session-btn" style="padding: 8px 20px; white-space: nowrap;">🚀 Create Session</button>
+                    <button onclick="createSession()" id="create-session-btn" style="padding: 8px 20px; white-space: nowrap;" disabled>🚀 Create Session</button>
                     <button onclick="endCurrentSession()" id="end-session-btn" style="padding: 8px 20px; background: #f44336; white-space: nowrap;" class="hidden">🛑 End Session</button>
                 </div>
             </div>
@@ -734,11 +731,105 @@
             vuFill.style.height = Math.min(100, Math.max(0, level)) + '%';
         }
 
+        // Forward declaration for admin login (defined later)
+        window.adminLogin = null;
+
         // Initialize VU meter on page load
         document.addEventListener('DOMContentLoaded', () => {
             initializeVUMeter();
             // Check for stored admin tokens on startup
             checkStoredAdminTokens();
+            
+            // Setup admin login event listeners
+            const adminUsername = document.getElementById('admin-username');
+            const adminPassword = document.getElementById('admin-password');
+            const adminLoginBtn = document.getElementById('admin-login-btn');
+            
+            adminUsername.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    document.getElementById('admin-login-btn').click();
+                }
+            });
+            adminPassword.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    document.getElementById('admin-login-btn').click();
+                }
+            });
+            adminLoginBtn.addEventListener('click', async () => {
+                const username = document.getElementById('admin-username').value.trim();
+                const password = document.getElementById('admin-password').value;
+                
+                if (!username || !password) {
+                    showLoginStatus('Please enter username and password', 'error');
+                    return;
+                }
+                
+                adminLoginBtn.disabled = true;
+                adminLoginBtn.textContent = '🔄 Authenticating...';
+                
+                try {
+                    const result = await window.electronAPI.adminAuthenticate({ username, password });
+                if (result.success) {
+                    // Store auth result for WebSocket authentication
+                    window.adminAuthResult = result;
+                    
+                    // Set logged in flag
+                    isLoggedIn = true;
+                    
+                    // Hide login panel, show main app
+                    document.getElementById('login-panel').classList.add('hidden');
+                    document.getElementById('main-app').classList.remove('hidden');
+                    document.getElementById('admin-logout-btn').classList.remove('hidden');
+                    
+                    showStatus(`✅ Authenticated as ${result.username}`, 'success');
+                        
+                        // Auto-connect to WebSocket server
+                        setTimeout(async () => {
+                            try {
+                                // Store tokens for WebSocket manager
+                                if (result.token && result.refreshToken && result.tokenExpiry) {
+                                    await window.electronAPI.storeAdminTokens({
+                                        username: result.username,
+                                        accessToken: result.token,
+                                        refreshToken: result.refreshToken,
+                                        expiresAt: new Date(result.tokenExpiry)
+                                    });
+                                }
+                                
+                                const connectResult = await window.electronAPI.connectWebSocket();
+                                if (connectResult.success) {
+                                    await new Promise(resolve => setTimeout(resolve, 500));
+                                    const wsAuthResult = await window.electronAPI.adminAuthenticateWithToken({ token: result.token });
+                                    if (wsAuthResult.success) {
+                                        updateWebSocketStatus('connected');
+                                        await refreshSessions();
+                                        showStatus('✅ Connected to WebSocket server', 'success');
+                                    } else {
+                                        console.error('WS auth failed:', wsAuthResult);
+                                        showStatus('⚠️ WebSocket auth failed. Click Reconnect.', 'warning');
+                                    }
+                                } else {
+                                    console.error('WS connect failed:', connectResult);
+                                    showStatus('⚠️ WebSocket connection failed. Click Reconnect.', 'warning');
+                                }
+                            } catch (error) {
+                                console.error('WebSocket connection/auth error:', error);
+                                showStatus('⚠️ Click Reconnect to connect to WebSocket.', 'warning');
+                            }
+                        }, 100);
+                    } else {
+                        showLoginStatus(result.error || 'Authentication failed', 'error');
+                        adminLoginBtn.disabled = false;
+                        adminLoginBtn.textContent = '🔑 Login';
+                    }
+                } catch (error) {
+                    showLoginStatus(error.message, 'error');
+                    adminLoginBtn.disabled = false;
+                    adminLoginBtn.textContent = '🔑 Login';
+                }
+            });
         });
 
         function handleLoginKeyPress(event) {
@@ -943,11 +1034,17 @@
                 
                 if (isRunning) {
                     console.info('Server is running, attempting to reconnect...');
-                    connectToWebSocketServer();
-                    showStatus('Reconnected to WebSocket server', 'success');
-                    console.info('Reconnected to WebSocket server');
+                    const connectResult = await window.electronAPI.connectWebSocket();
+                    if (connectResult.success && window.adminAuthResult?.token) {
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                        const wsAuthResult = await window.electronAPI.adminAuthenticateWithToken({ token: window.adminAuthResult.token });
+                        if (wsAuthResult.success) {
+                            updateWebSocketStatus('connected');
+                            await refreshSessions();
+                            showStatus('Reconnected to WebSocket server', 'success');
+                        }
+                    }
                 } else {
-                    // Server is not running, try to start it
                     console.info('Server is not running, attempting to start...');
                     await checkAndStartWebSocketServer();
                 }
@@ -1082,9 +1179,11 @@
         };
 
         // Admin authentication functions
-        async function adminLogin() {
+        window.adminLogin = async function() {
+            console.log('adminLogin called');
             const username = document.getElementById('admin-username').value.trim();
             const password = document.getElementById('admin-password').value;
+            console.log('Username:', username, 'Password length:', password?.length);
 
             if (!username || !password) {
                 showLoginStatus('Please enter username and password', 'error');
@@ -1125,9 +1224,6 @@
                     document.getElementById('login-panel').classList.add('hidden');
                     document.getElementById('main-app').classList.remove('hidden');
                     document.getElementById('admin-logout-btn').classList.remove('hidden');
-                    document.getElementById('admin-identity-display').classList.remove('hidden');
-                    document.getElementById('admin-username-display').textContent = result.username;
-                    document.getElementById('admin-id-display').textContent = result.adminId.substring(0, 8) + '...';
 
                     showStatus(`✅ Authenticated as ${result.username}`, 'success');
 
@@ -1182,7 +1278,6 @@
                 document.getElementById('main-app').classList.add('hidden');
                 document.getElementById('login-panel').classList.remove('hidden');
                 document.getElementById('admin-logout-btn').classList.add('hidden');
-                document.getElementById('admin-identity-display').classList.add('hidden');
                 document.getElementById('token-expiry-warning').classList.add('hidden');
 
                 // Clear form
@@ -1337,13 +1432,13 @@
                         });
 
                         if (result.success) {
+                            // Set logged in flag
+                            isLoggedIn = true;
+                            
                             // Update UI
                             document.getElementById('login-panel').classList.add('hidden');
                             document.getElementById('main-app').classList.remove('hidden');
                             document.getElementById('admin-logout-btn').classList.remove('hidden');
-                            document.getElementById('admin-identity-display').classList.remove('hidden');
-                            document.getElementById('admin-username-display').textContent = stored.username;
-                            document.getElementById('admin-id-display').textContent = stored.adminId.substring(0, 8) + '...';
 
                             setupTokenManagement();
                             showStatus(`✅ Reconnected as ${stored.username}`, 'success');
@@ -1374,12 +1469,6 @@
                 setTimeout(() => {
                     statusDiv.classList.add('hidden');
                 }, 3000);
-            }
-        }
-
-        function handleAdminLoginKeyPress(event) {
-            if (event.key === 'Enter') {
-                adminLogin();
             }
         }
 
@@ -1441,6 +1530,22 @@
             startBtn.textContent = '🎤 Starting...';
 
             try {
+                // Update session config with current app settings before streaming
+                const currentSessionId = document.getElementById('current-session-id').textContent;
+                if (currentSessionId && currentSessionId !== 'Not Connected') {
+                    showStatus('Updating session configuration...', 'info');
+                    const config = await window.electronAPI.loadConfig();
+                    
+                    const sessionConfig = {
+                        sessionId: currentSessionId,
+                        enabledLanguages: config?.targetLanguages || ['en', 'es', 'fr', 'de', 'it'],
+                        ttsMode: config?.tts?.mode || 'neural',
+                        audioQuality: (config?.tts?.mode === 'neural' ? 'high' : 'medium')
+                    };
+                    
+                    await window.electronAPI.updateSessionConfig(sessionConfig);
+                }
+                
                 await window.electronAPI.startLocalStreaming();
                 
                 isStreaming = true;
@@ -1636,16 +1741,6 @@
             // In a full implementation, this would show session details in a modal or panel
         }
 
-        async function reconnectToSession(sessionId) {
-            try {
-                showStatus(`Reconnecting to session ${sessionId}...`, 'info');
-                // Implementation would reconnect to the session
-                await refreshSessions();
-            } catch (error) {
-                showStatus(`Failed to reconnect: ${error.message}`, 'error');
-            }
-        }
-
         async function endSessionFromList(sessionId) {
             if (!confirm(`Are you sure you want to end session ${sessionId}?`)) {
                 return;
@@ -1659,30 +1754,36 @@
             } catch (error) {
                 showStatus(`Failed to end session: ${error.message}`, 'error');
             }
-            `).join('');
         }
 
         async function reconnectToSession(sessionId) {
             try {
                 showStatus(`Reconnecting to session ${sessionId}...`, 'info');
                 
-                const result = await window.electronAPI.createSession(sessionId);
+                // Set WebSocketManager's internal session state
+                const config = await window.electronAPI.loadConfig();
+                const sessionConfig = {
+                    sessionId,
+                    enabledLanguages: config?.targetLanguages || ['en', 'es', 'fr', 'de', 'it'],
+                    ttsMode: config?.tts?.mode || 'neural',
+                    audioQuality: (config?.tts?.mode === 'neural' ? 'high' : 'medium')
+                };
                 
-                if (result.success) {
-                    document.getElementById('current-session-id').textContent = sessionId;
-                    document.getElementById('create-session-btn').classList.add('hidden');
-                    document.getElementById('end-session-btn').classList.remove('hidden');
-                    
-                    // Enable Start Streaming button
-                    const startBtn = document.getElementById('start-btn');
-                    startBtn.disabled = false;
-                    startBtn.title = '';
-                    
-                    showStatus(`Reconnected to session ${sessionId}`, 'success');
-                    await refreshSessions();
-                } else {
-                    showStatus(`Failed to reconnect: ${result.error}`, 'error');
-                }
+                await window.electronAPI.setCurrentSession(sessionConfig);
+                
+                // Update local UI state
+                document.getElementById('current-session-id').textContent = sessionId;
+                document.getElementById('sessionId').value = sessionId;
+                document.getElementById('create-session-btn').classList.add('hidden');
+                document.getElementById('end-session-btn').classList.remove('hidden');
+                
+                // Enable Start Streaming button
+                const startBtn = document.getElementById('start-btn');
+                startBtn.disabled = false;
+                startBtn.title = '';
+                
+                showStatus(`Reconnected to session ${sessionId}`, 'success');
+                await refreshSessions();
             } catch (error) {
                 console.error('Failed to reconnect:', error);
                 showStatus(`Failed to reconnect: ${error.message}`, 'error');
@@ -1717,8 +1818,11 @@
             try {
                 showStatus('Creating session...', 'info');
                 
+                // Load current config to pass to backend
+                const config = await window.electronAPI.loadConfig();
+                
                 // Call backend to create session (this will connect WebSocket and create session)
-                const result = await window.electronAPI.createSession(sessionId);
+                const result = await window.electronAPI.createSession(sessionId, config);
                 
                 if (!result.success) {
                     throw new Error(result.error || 'Failed to create session');
@@ -1975,6 +2079,9 @@
         // TTS Server Health Functions
         function updateWebSocketStatus(status) {
             const statusElement = document.getElementById('ws-server-status');
+            const refreshBtn = document.getElementById('refresh-sessions-btn');
+            const createBtn = document.getElementById('create-session-btn');
+            
             const statusMap = {
                 'unknown': { text: 'Unknown', color: '#999' },
                 'starting': { text: 'Starting...', color: '#FF9800' },
@@ -1989,6 +2096,11 @@
             const statusInfo = statusMap[status] || statusMap['unknown'];
             statusElement.textContent = statusInfo.text;
             statusElement.style.color = statusInfo.color;
+            
+            // Enable buttons only when connected
+            const isConnected = status === 'connected';
+            if (refreshBtn) refreshBtn.disabled = !isConnected;
+            if (createBtn) createBtn.disabled = !isConnected;
         }
 
         function updateClientCount() {

@@ -5,7 +5,7 @@ export interface PollyConfig {
   region: string;
   identityPoolId: string;
   userPoolId: string;
-  jwtToken: string;
+  jwtToken?: string; // Optional - can be provided by capture app
   enabled: boolean;
 }
 
@@ -35,6 +35,11 @@ export class PollyService {
   }
 
   private initializeClient(): void {
+    if (!this.config.jwtToken) {
+      console.warn('PollyService: jwtToken not provided, TTS will not be available');
+      return;
+    }
+
     this.pollyClient = new PollyClient({
       region: this.config.region,
       credentials: fromCognitoIdentityPool({

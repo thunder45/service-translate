@@ -5,7 +5,8 @@ import { AudioManager } from './audio-manager';
 import { TTSService } from './tts-service';
 import { TTSFallbackManager } from './tts-fallback-manager';
 import { AuthManager } from './auth-manager';
-import { AdminIdentityManager } from './admin-identity-manager';
+import { AdminIdentityManager, CognitoTokens } from './admin-identity-manager';
+import { CognitoAuthService, CognitoAuthError, CognitoErrorCode } from './cognito-auth';
 import { 
   AdminAuthMessage,
   AdminAuthResponse,
@@ -31,6 +32,7 @@ export class MessageRouter {
     private sessionManager: SessionManager,
     private authManager: AuthManager,
     private adminIdentityManager: AdminIdentityManager,
+    private cognitoAuth: CognitoAuthService,
     private audioManager?: AudioManager,
     private errorLogger?: any
   ) {
@@ -106,11 +108,12 @@ export class MessageRouter {
   }
 
   // ============================================================================
-  // Admin Authentication Handlers (Task 5.1)
+  // Admin Authentication Handlers (Task 5)
   // ============================================================================
 
   /**
    * Handle admin authentication with both credential and token methods
+   * Now uses Cognito for authentication instead of local credentials
    */
   private async handleAdminAuth(socket: Socket, data: AdminAuthMessage): Promise<void> {
     console.log(`Admin authentication request from ${socket.id}, method: ${data.method}`);
@@ -124,12 +127,15 @@ export class MessageRouter {
         return;
       }
 
-      let adminIdentity;
-      let tokens;
+      let result: {
+        adminId: string;
+        cognitoTokens?: CognitoTokens;
+        ownedSessions: string[];
+      };
       let isReconnection = false;
 
       if (data.method === 'credentials') {
-        // Credential-based authentication
+        // Credential-based authentication with Cognito
         if (!data.username || !data.password) {
           this.sendAdminError(socket, AdminErrorCode.VALIDATION_MISSING_REQUIRED_FIELD, {
             validationErrors: ['username and password are required for credentials method']
@@ -137,37 +143,25 @@ export class MessageRouter {
           return;
         }
 
-        // Authenticate with AuthManager
-        const authSessionId = this.authManager.authenticate(
-          data.username,
-          data.password,
-          socket.handshake.address,
-          socket.handshake.headers['user-agent']
-        );
+        try {
+          // Authenticate with Cognito and register admin
+          result = await this.adminIdentityManager.authenticateWithCredentials(
+            data.username,
+            data.password,
+            socket.id
+          );
 
-        if (!authSessionId) {
-          this.sendAdminError(socket, AdminErrorCode.AUTH_INVALID_CREDENTIALS);
+          console.log(`Admin authenticated with Cognito: ${data.username} (${result.adminId})`);
+        } catch (error) {
+          // Map Cognito errors to admin error codes
+          const adminError = this.mapCognitoError(error);
+          this.sendAdminError(socket, adminError, {
+            operation: 'cognito-auth'
+          });
           return;
         }
-
-        // Register or retrieve admin identity
-        adminIdentity = this.adminIdentityManager.registerAdminConnection(data.username, socket.id);
-        
-        // Generate JWT tokens
-        tokens = this.adminIdentityManager.generateTokenPair(adminIdentity.adminId);
-        
-        // Schedule token expiry warning
-        this.adminIdentityManager.scheduleExpiryWarning(
-          adminIdentity.adminId,
-          tokens.accessTokenExpiry,
-          (adminId, expiresAt, timeRemaining) => {
-            this.sendTokenExpiryWarning(adminId, expiresAt, timeRemaining);
-          }
-        );
-
-        console.log(`Admin authenticated with credentials: ${data.username} (${adminIdentity.adminId})`);
       } else {
-        // Token-based authentication
+        // Token-based authentication with Cognito
         if (!data.token) {
           this.sendAdminError(socket, AdminErrorCode.VALIDATION_MISSING_REQUIRED_FIELD, {
             validationErrors: ['token is required for token method']
@@ -176,64 +170,30 @@ export class MessageRouter {
         }
 
         try {
-          // Validate token and register connection
-          adminIdentity = this.adminIdentityManager.registerAdminConnectionWithToken(data.token, socket.id);
-          
-          // Check if token needs refresh
-          const tokenStatus = this.adminIdentityManager.checkTokenStatus(data.token);
-          if (tokenStatus.needsRefresh) {
-            // Token is valid but expiring soon, include in response
-            console.log(`Token for admin ${adminIdentity.adminId} needs refresh (${tokenStatus.timeRemaining}s remaining)`);
-          }
-          
-          // Use existing token
-          tokens = {
-            accessToken: data.token,
-            refreshToken: '', // Client should already have refresh token
-            accessTokenExpiry: this.adminIdentityManager.getTokenExpiry(data.token)!,
-            refreshTokenExpiry: new Date() // Not used for token auth
-          };
-          
-          // Schedule token expiry warning
-          this.adminIdentityManager.scheduleExpiryWarning(
-            adminIdentity.adminId,
-            tokens.accessTokenExpiry,
-            (adminId, expiresAt, timeRemaining) => {
-              this.sendTokenExpiryWarning(adminId, expiresAt, timeRemaining);
-            }
+          // Validate Cognito token and register connection
+          result = await this.adminIdentityManager.authenticateWithToken(
+            data.token,
+            socket.id
           );
 
           isReconnection = true;
-          console.log(`Admin reconnected with token: ${adminIdentity.username} (${adminIdentity.adminId})`);
+          console.log(`Admin reconnected with Cognito token: ${result.adminId}`);
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-          if (errorMessage.includes('expired')) {
-            this.sendAdminError(socket, AdminErrorCode.AUTH_TOKEN_EXPIRED);
-          } else if (errorMessage.includes('invalid')) {
-            this.sendAdminError(socket, AdminErrorCode.AUTH_TOKEN_INVALID);
-          } else {
-            this.sendAdminError(socket, AdminErrorCode.SYSTEM_INTERNAL_ERROR, {
-              operation: 'token-validation'
-            });
-          }
+          console.error('Token validation error:', error);
+          console.error('Error type:', error?.constructor?.name);
+          console.error('Error message:', error instanceof Error ? error.message : String(error));
+          console.error('Error stack:', error instanceof Error ? error.stack : 'No stack');
+          // Map Cognito errors to admin error codes
+          const adminError = this.mapCognitoError(error);
+          this.sendAdminError(socket, adminError, {
+            operation: 'token-validation'
+          });
           return;
         }
       }
 
-      // Recover admin sessions
-      const ownedSessionIds = this.adminIdentityManager.recoverAdminSessions(adminIdentity.adminId);
-      
-      // Update session admin socket IDs
-      const updatedCount = this.adminIdentityManager.updateSessionAdminSocket(
-        adminIdentity.adminId,
-        socket.id,
-        (sessionId, newSocketId) => {
-          this.sessionManager.updateCurrentAdminSocket(sessionId, newSocketId);
-        }
-      );
-
       // Get owned sessions with full details
-      const ownedSessions: SessionSummary[] = ownedSessionIds.map(sessionId => {
+      const ownedSessions: SessionSummary[] = result.ownedSessions.map(sessionId => {
         const session = this.sessionManager.getSession(sessionId);
         if (!session) return null;
         
@@ -258,7 +218,7 @@ export class MessageRouter {
         clientCount: session.clients.size,
         createdAt: session.createdAt.toISOString(),
         createdBy: session.createdBy,
-        isOwner: session.adminId === adminIdentity.adminId,
+        isOwner: session.adminId === result.adminId,
         config: {
           enabledLanguages: session.config.enabledLanguages,
           ttsMode: session.config.ttsMode
@@ -266,17 +226,38 @@ export class MessageRouter {
       }));
 
       // Get admin permissions
-      const permissions = this.adminIdentityManager.getAdminPermissions(adminIdentity.adminId);
+      const permissions = this.adminIdentityManager.getAdminPermissions(result.adminId);
 
-      // Send successful authentication response
+      // Get admin identity for username
+      const adminIdentity = this.adminIdentityManager.getAdminIdentity(result.adminId);
+      const username = adminIdentity?.cognitoUsername || adminIdentity?.email || result.adminId;
+
+      // Prepare token response based on authentication method
+      let accessToken: string;
+      let tokenExpiry: string | undefined;
+      let refreshToken: string | undefined;
+
+      if ('cognitoTokens' in result && result.cognitoTokens) {
+        // Credentials method - return new tokens
+        accessToken = result.cognitoTokens.accessToken;
+        tokenExpiry = new Date(result.cognitoTokens.expiresIn * 1000).toISOString();
+        refreshToken = result.cognitoTokens.refreshToken;
+      } else {
+        // Token method - return existing token
+        accessToken = data.token!;
+        tokenExpiry = undefined;
+        refreshToken = undefined;
+      }
+
+      // Send successful authentication response with Cognito tokens
       const response: AdminAuthResponse = {
         type: 'admin-auth-response',
         success: true,
-        adminId: adminIdentity.adminId,
-        username: adminIdentity.username,
-        token: tokens.accessToken,
-        tokenExpiry: tokens.accessTokenExpiry.toISOString(),
-        refreshToken: data.method === 'credentials' ? tokens.refreshToken : undefined,
+        adminId: result.adminId,
+        username,
+        token: accessToken,
+        tokenExpiry,
+        refreshToken,
         ownedSessions,
         allSessions,
         permissions,
@@ -286,17 +267,17 @@ export class MessageRouter {
       socket.emit('admin-auth-response', response);
 
       // If reconnection, send reconnection notification
-      if (isReconnection && ownedSessionIds.length > 0) {
+      if (isReconnection && result.ownedSessions.length > 0) {
         socket.emit('admin-reconnection', {
           type: 'admin-reconnection',
-          adminId: adminIdentity.adminId,
-          username: adminIdentity.username,
-          recoveredSessions: ownedSessionIds,
+          adminId: result.adminId,
+          username,
+          recoveredSessions: result.ownedSessions,
           timestamp: new Date().toISOString()
         });
       }
 
-      console.log(`Admin authentication successful: ${adminIdentity.username}, recovered ${updatedCount} sessions`);
+      console.log(`Admin authentication successful: ${result.adminId}, recovered ${result.ownedSessions.length} sessions`);
     } catch (error) {
       console.error('Admin authentication error:', error);
       this.sendAdminError(socket, AdminErrorCode.SYSTEM_INTERNAL_ERROR, {
@@ -306,22 +287,127 @@ export class MessageRouter {
   }
 
   /**
-   * Send token expiry warning to admin
+   * Map Cognito errors to admin error codes
    */
-  private sendTokenExpiryWarning(adminId: string, expiresAt: Date, timeRemaining: number): void {
-    const sockets = this.adminIdentityManager.getAdminSockets(adminId);
-    
-    for (const socketId of sockets) {
-      this.io.to(socketId).emit('token-expiry-warning', {
-        type: 'token-expiry-warning',
-        adminId,
-        expiresAt: expiresAt.toISOString(),
-        timeRemaining,
-        timestamp: new Date().toISOString()
-      });
+  private mapCognitoError(error: any): AdminErrorCode {
+    if (error instanceof CognitoAuthError) {
+      switch (error.code) {
+        case CognitoErrorCode.INVALID_CREDENTIALS:
+          return AdminErrorCode.AUTH_INVALID_CREDENTIALS;
+        case CognitoErrorCode.TOKEN_EXPIRED:
+          return AdminErrorCode.AUTH_TOKEN_EXPIRED;
+        case CognitoErrorCode.TOKEN_INVALID:
+          return AdminErrorCode.AUTH_TOKEN_INVALID;
+        case CognitoErrorCode.USER_NOT_FOUND:
+          return AdminErrorCode.COGNITO_USER_NOT_FOUND;
+        case CognitoErrorCode.USER_DISABLED:
+          return AdminErrorCode.COGNITO_USER_DISABLED;
+        case CognitoErrorCode.COGNITO_UNAVAILABLE:
+          return AdminErrorCode.COGNITO_UNAVAILABLE;
+        case CognitoErrorCode.REFRESH_TOKEN_EXPIRED:
+          return AdminErrorCode.AUTH_REFRESH_TOKEN_EXPIRED;
+        case CognitoErrorCode.INSUFFICIENT_PERMISSIONS:
+          return AdminErrorCode.COGNITO_INSUFFICIENT_PERMISSIONS;
+        default:
+          return AdminErrorCode.SYSTEM_INTERNAL_ERROR;
+      }
     }
     
-    console.log(`Sent token expiry warning to admin ${adminId} (${timeRemaining}s remaining)`);
+    // For non-Cognito errors, check error message
+    const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
+    if (errorMessage.includes('expired')) {
+      return AdminErrorCode.AUTH_TOKEN_EXPIRED;
+    } else if (errorMessage.includes('invalid')) {
+      return AdminErrorCode.AUTH_TOKEN_INVALID;
+    }
+    
+    return AdminErrorCode.SYSTEM_INTERNAL_ERROR;
+  }
+
+  /**
+   * Handle user deleted from Cognito
+   * Terminates all sessions and disconnects all sockets for the admin
+   */
+  private async handleUserDeletedFromCognito(adminId: string): Promise<void> {
+    console.log(`Handling user deleted from Cognito: ${adminId}`);
+
+    try {
+      // Get admin identity
+      const adminIdentity = this.adminIdentityManager.getAdminIdentity(adminId);
+      if (!adminIdentity) {
+        console.log(`Admin identity not found for deleted user: ${adminId}`);
+        return;
+      }
+
+      // Get all owned sessions
+      const ownedSessions = Array.from(adminIdentity.ownedSessions);
+
+      // End all owned sessions
+      for (const sessionId of ownedSessions) {
+        const success = this.sessionManager.endSession(sessionId);
+        if (success) {
+          // Notify all clients in the session
+          this.io.to(sessionId).emit('session-ended', {
+            type: 'session-ended',
+            sessionId,
+            reason: 'admin-account-deleted',
+            timestamp: new Date().toISOString()
+          });
+
+          // Disconnect all clients from room
+          this.io.in(sessionId).socketsLeave(sessionId);
+          
+          console.log(`Ended session ${sessionId} due to admin account deletion`);
+        }
+      }
+
+      // Get all active sockets for this admin
+      const sockets = this.adminIdentityManager.getAdminSockets(adminId);
+
+      // Send session expired notification to all sockets
+      for (const socketId of sockets) {
+        this.io.to(socketId).emit('session-expired', {
+          type: 'session-expired',
+          adminId,
+          reason: 'user-deleted',
+          message: 'Your account has been deleted. Please contact administrator.',
+          timestamp: new Date().toISOString()
+        });
+
+        // Disconnect the socket
+        const socket = this.io.sockets.sockets.get(socketId);
+        if (socket) {
+          socket.disconnect(true);
+        }
+      }
+
+      // Delete admin identity
+      this.adminIdentityManager.deleteAdminIdentity(adminId);
+
+      console.log(`Terminated ${ownedSessions.length} sessions and disconnected ${sockets.length} sockets for deleted user ${adminId}`);
+    } catch (error) {
+      console.error(`Failed to handle user deleted from Cognito for admin ${adminId}:`, error);
+    }
+  }
+
+  /**
+   * Validate admin token and handle user deletion
+   * Called periodically or on specific operations to detect deleted users
+   */
+  private async validateAdminToken(adminId: string, accessToken: string): Promise<boolean> {
+    try {
+      await this.cognitoAuth.validateToken(accessToken);
+      return true;
+    } catch (error) {
+      if (error instanceof CognitoAuthError) {
+        if (error.code === CognitoErrorCode.USER_NOT_FOUND) {
+          // User was deleted from Cognito
+          await this.handleUserDeletedFromCognito(adminId);
+          return false;
+        }
+      }
+      return false;
+    }
   }
 
   /**
@@ -354,11 +440,11 @@ export class MessageRouter {
   }
 
   // ============================================================================
-  // Token Management Handlers (Task 5.2)
+  // Token Management Handlers (Task 5)
   // ============================================================================
 
   /**
-   * Handle token refresh request
+   * Handle token refresh request using Cognito
    */
   private async handleTokenRefresh(socket: Socket, data: any): Promise<void> {
     console.log(`Token refresh request from ${socket.id}`);
@@ -373,133 +459,49 @@ export class MessageRouter {
         return;
       }
 
-      // Attempt to refresh tokens
-      const tokens = this.adminIdentityManager.handleTokenRefresh(
-        data.refreshToken,
-        (adminId, newTokens) => {
-          // Success callback - schedule new expiry warning
-          this.adminIdentityManager.scheduleExpiryWarning(
-            adminId,
-            newTokens.accessTokenExpiry,
-            (adminId, expiresAt, timeRemaining) => {
-              this.sendTokenExpiryWarning(adminId, expiresAt, timeRemaining);
-            }
-          );
-          
-          console.log(`Token refreshed successfully for admin ${adminId}`);
-        },
-        (error) => {
-          // Error callback
-          console.error('Token refresh failed:', error);
-        }
-      );
+      // Get admin identity from socket
+      const adminIdentity = this.adminIdentityManager.getAdminBySocketId(socket.id);
+      if (!adminIdentity) {
+        this.sendAdminError(socket, AdminErrorCode.AUTH_SESSION_NOT_FOUND, {
+          operation: 'token-refresh'
+        });
+        return;
+      }
 
-      if (tokens) {
-        // Send success response
+      try {
+        // Refresh Cognito tokens
+        const result = await this.cognitoAuth.refreshAccessToken(
+          adminIdentity.cognitoUsername,
+          data.refreshToken
+        );
+
+        // Send success response with new Cognito tokens
         socket.emit('token-refresh-response', {
           type: 'token-refresh-response',
           success: true,
-          token: tokens.accessToken,
-          tokenExpiry: tokens.accessTokenExpiry.toISOString(),
-          refreshToken: tokens.refreshToken,
+          token: result.accessToken,
+          tokenExpiry: new Date(result.expiresIn * 1000).toISOString(),
+          refreshToken: data.refreshToken, // Refresh token doesn't change
           timestamp: new Date().toISOString()
         });
         
-        console.log(`Token refresh successful for socket ${socket.id}`);
-      } else {
-        // Refresh failed
-        this.sendAdminError(socket, AdminErrorCode.AUTH_REFRESH_TOKEN_INVALID, {
+        console.log(`Cognito token refresh successful for admin ${adminIdentity.adminId}`);
+      } catch (error) {
+        // Map Cognito errors to admin error codes
+        const adminError = this.mapCognitoError(error);
+        this.sendAdminError(socket, adminError, {
           operation: 'token-refresh'
         });
       }
     } catch (error) {
       console.error('Token refresh error:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      
-      if (errorMessage.includes('expired')) {
-        this.sendAdminError(socket, AdminErrorCode.AUTH_REFRESH_TOKEN_EXPIRED);
-      } else if (errorMessage.includes('invalid') || errorMessage.includes('not found')) {
-        this.sendAdminError(socket, AdminErrorCode.AUTH_REFRESH_TOKEN_INVALID);
-      } else {
-        this.sendAdminError(socket, AdminErrorCode.SYSTEM_INTERNAL_ERROR, {
-          operation: 'token-refresh'
-        });
-      }
-    }
-  }
-
-  /**
-   * Send session expired notification to admin
-   */
-  private sendSessionExpiredNotification(adminId: string, reason: 'token-expired' | 'invalid-token' | 'revoked'): void {
-    const sockets = this.adminIdentityManager.getAdminSockets(adminId);
-    
-    for (const socketId of sockets) {
-      this.io.to(socketId).emit('session-expired', {
-        type: 'session-expired',
-        adminId,
-        reason,
-        timestamp: new Date().toISOString()
+      this.sendAdminError(socket, AdminErrorCode.SYSTEM_INTERNAL_ERROR, {
+        operation: 'token-refresh'
       });
     }
-    
-    console.log(`Sent session expired notification to admin ${adminId} (reason: ${reason})`);
   }
 
-  /**
-   * Clean up expired tokens for an admin
-   * Called periodically or on specific events
-   */
-  private cleanupExpiredTokens(adminId: string): void {
-    try {
-      const identity = this.adminIdentityManager.getAdminIdentity(adminId);
-      if (!identity) {
-        return;
-      }
 
-      // Check each refresh token for expiry
-      const expiredTokens: string[] = [];
-      for (const refreshToken of identity.refreshTokens) {
-        try {
-          const tokenStatus = this.adminIdentityManager.checkTokenStatus(refreshToken);
-          if (tokenStatus.isExpired) {
-            expiredTokens.push(refreshToken);
-          }
-        } catch (error) {
-          // Token is invalid, mark for removal
-          expiredTokens.push(refreshToken);
-        }
-      }
-
-      // Remove expired tokens
-      for (const token of expiredTokens) {
-        this.adminIdentityManager.revokeRefreshToken(adminId, token);
-      }
-
-      if (expiredTokens.length > 0) {
-        console.log(`Cleaned up ${expiredTokens.length} expired tokens for admin ${adminId}`);
-      }
-    } catch (error) {
-      console.error(`Failed to cleanup expired tokens for admin ${adminId}:`, error);
-    }
-  }
-
-  /**
-   * Start automatic token cleanup scheduler
-   * Runs every hour to clean up expired tokens
-   */
-  public startTokenCleanupScheduler(): void {
-    setInterval(() => {
-      console.log('Running automatic token cleanup...');
-      const allAdmins = this.adminIdentityManager.getAllAdminIdentities();
-      
-      for (const admin of allAdmins) {
-        this.cleanupExpiredTokens(admin.adminId);
-      }
-    }, 60 * 60 * 1000); // Every hour
-    
-    console.log('Token cleanup scheduler started');
-  }
 
   // ============================================================================
   // Admin Session Access Handlers (Task 5.4)
@@ -597,7 +599,7 @@ export class MessageRouter {
       timestamp: new Date().toISOString()
     });
 
-    console.log(`Admin ${adminIdentity.username} accessed session ${sessionId} with ${accessType} access`);
+    console.log(`Admin ${adminIdentity.cognitoUsername} accessed session ${sessionId} with ${accessType} access`);
   }
 
   /**
@@ -623,17 +625,22 @@ export class MessageRouter {
     const { sessionId, config } = validation.message;
 
     try {
-      // Create session with admin identity
-      const sessionData = this.sessionManager.createSession(
-        sessionId,
-        config,
-        adminIdentity.adminId,
-        socket.id,
-        adminIdentity.username
-      );
+      // Check if session already exists
+      let sessionData = this.sessionManager.getSession(sessionId);
       
-      // Add session to admin's owned sessions
-      this.adminIdentityManager.addOwnedSession(adminIdentity.adminId, sessionId);
+      if (!sessionData) {
+        // Create new session if it doesn't exist
+        sessionData = this.sessionManager.createSession(
+          sessionId,
+          config,
+          adminIdentity.adminId,
+          socket.id,
+          adminIdentity.cognitoUsername
+        );
+        
+        // Add session to admin's owned sessions
+        this.adminIdentityManager.addOwnedSession(adminIdentity.adminId, sessionId);
+      }
       
       socket.join(sessionId);
       socket.emit('start-session-response', {
@@ -641,11 +648,11 @@ export class MessageRouter {
         success: true,
         sessionId,
         adminId: adminIdentity.adminId,
-        config,
+        config: sessionData.config,
         timestamp: new Date().toISOString()
       });
       
-      console.log(`Session started: ${sessionId} by admin ${adminIdentity.username} (${adminIdentity.adminId})`);
+      console.log(`Session started: ${sessionId} by admin ${adminIdentity.cognitoUsername} (${adminIdentity.adminId})`);
     } catch (error) {
       console.error('Failed to start session:', error);
       this.sendAdminError(socket, AdminErrorCode.SESSION_CREATION_FAILED, {
@@ -714,7 +721,7 @@ export class MessageRouter {
         timestamp: new Date().toISOString()
       });
       
-      console.log(`Session ended: ${sessionId} by admin ${adminIdentity.username} (${adminIdentity.adminId})`);
+      console.log(`Session ended: ${sessionId} by admin ${adminIdentity.cognitoUsername} (${adminIdentity.adminId})`);
     } else {
       this.sendAdminError(socket, AdminErrorCode.SESSION_DELETE_FAILED, { sessionId });
     }
@@ -794,7 +801,7 @@ export class MessageRouter {
       timestamp: new Date().toISOString()
     });
     
-    console.log(`Listed ${sessionsList.length} sessions for admin ${adminIdentity.username} (filter: ${filter})`);
+    console.log(`Listed ${sessionsList.length} sessions for admin ${adminIdentity.cognitoUsername} (filter: ${filter})`);
   }
 
   /**
@@ -957,7 +964,7 @@ export class MessageRouter {
         timestamp: new Date().toISOString()
       });
       
-      console.log(`Config updated for session: ${sessionId} by admin ${adminIdentity.username}`);
+      console.log(`Config updated for session: ${sessionId} by admin ${adminIdentity.cognitoUsername}`);
     } else {
       this.sendAdminError(socket, AdminErrorCode.SESSION_UPDATE_FAILED, { sessionId });
     }
@@ -1154,7 +1161,7 @@ export class MessageRouter {
    * Handle translation broadcasting (admin only)
    */
   private async handleTranslationBroadcast(socket: Socket, data: any): Promise<void> {
-    const { sessionId, translations, audioResults, original } = data;
+    const { sessionId, translations, audioResults, original, generateTTS, voiceType } = data;
     
     if (!sessionId) {
       this.sendError(socket, 400, 'Missing sessionId');
@@ -1167,7 +1174,7 @@ export class MessageRouter {
       return;
     }
 
-    // Broadcast to all clients in session
+    // Get all clients in session
     const clients = this.sessionManager.getSessionClients(sessionId);
     
     if (clients.length === 0) {
@@ -1175,11 +1182,79 @@ export class MessageRouter {
       return;
     }
 
+    // Determine if we should generate TTS
+    const shouldGenerateTTS = generateTTS !== false && session.config.ttsMode !== 'disabled';
+    const effectiveVoiceType = voiceType || session.config.ttsMode;
+
+    console.log(`Broadcasting translations to ${clients.length} clients (TTS: ${shouldGenerateTTS}, mode: ${effectiveVoiceType})`);
+
+    // Generate TTS for each unique language if needed
+    const audioMap = new Map<string, { audioUrl?: string; audioMetadata?: any }>();
+    
+    if (shouldGenerateTTS && translations) {
+      const uniqueLanguages = [...new Set(clients.map(c => c.preferredLanguage))];
+      
+      for (const lang of uniqueLanguages) {
+        const translatedText = translations[lang];
+        if (!translatedText) continue;
+
+        try {
+          // Check for cached audio first
+          let audioInfo = null;
+          if (this.audioManager) {
+            audioInfo = this.audioManager.getAudioInfo(translatedText, lang, effectiveVoiceType);
+          }
+
+          if (!audioInfo) {
+            // Generate new TTS audio
+            console.log(`Generating TTS for ${lang}: ${translatedText.substring(0, 50)}...`);
+            
+            const ttsResult = await this.ttsService.synthesizeSpeech(
+              translatedText,
+              lang,
+              effectiveVoiceType
+            );
+
+            // Store audio if audio manager is available
+            if (this.audioManager) {
+              audioInfo = await this.audioManager.storeAudioFile(
+                ttsResult.audioBuffer,
+                translatedText,
+                lang,
+                ttsResult.voiceType,
+                ttsResult.format,
+                ttsResult.duration
+              );
+            }
+          } else {
+            console.log(`Using cached audio for ${lang}`);
+          }
+
+          if (audioInfo) {
+            audioMap.set(lang, {
+              audioUrl: audioInfo.url,
+              audioMetadata: {
+                audioId: audioInfo.id,
+                url: audioInfo.url,
+                duration: audioInfo.duration,
+                format: audioInfo.format,
+                voiceType: audioInfo.voiceType,
+                size: audioInfo.size
+              }
+            });
+          }
+        } catch (error) {
+          console.error(`Failed to generate TTS for ${lang}:`, error);
+          // Continue without audio for this language
+        }
+      }
+    }
+
     // Send to each client based on their language preference
     clients.forEach(client => {
       const lang = client.preferredLanguage;
       const translatedText = translations?.[lang];
-      const audioResult = audioResults?.find((a: any) => a.language === lang);
+      const audioData = audioMap.get(lang) || (audioResults?.find((a: any) => a.language === lang));
       
       if (translatedText) {
         this.io.to(client.socketId).emit('translation', {
@@ -1189,9 +1264,9 @@ export class MessageRouter {
           text: translatedText,
           language: lang,
           timestamp: Date.now(),
-          audioUrl: audioResult?.audioUrl || null,
-          audioMetadata: audioResult?.audioMetadata || null,
-          ttsAvailable: !!audioResult?.audioUrl
+          audioUrl: audioData?.audioUrl || null,
+          audioMetadata: audioData?.audioMetadata || null,
+          ttsAvailable: !!audioData?.audioUrl
         });
       }
     });

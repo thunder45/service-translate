@@ -993,11 +993,19 @@ Sessions are persisted to `./sessions/{sessionId}.json` with the following struc
 npm install
 ```
 
-### 2. Configure TTS
+### 2. Configure Server
 ```bash
-./setup-tts.sh  # Interactive setup
-# Or manually: cp .env.example .env && nano .env
+# Copy example environment file
+cp .env.example .env
+
+# Edit configuration
+nano .env
 ```
+
+**Required Configuration:**
+- Cognito authentication settings (see Cognito Setup section)
+- Session and admin identity directories
+- Optional: AWS Polly TTS settings
 
 ### 3. Start Server
 ```bash
@@ -1012,6 +1020,21 @@ npm start
 # Server
 PORT=3001
 
+# Cognito Authentication (REQUIRED)
+COGNITO_REGION=us-east-1                    # AWS region where User Pool is deployed
+COGNITO_USER_POOL_ID=us-east-1_xxxxxx      # From CDK deployment output
+COGNITO_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxx # From CDK deployment output
+
+# Admin Identity Persistence
+ADMIN_IDENTITIES_DIR=./admin-identities
+ADMIN_IDENTITY_CLEANUP_ENABLED=true
+ADMIN_IDENTITY_RETENTION_DAYS=90
+
+# Session Configuration
+SESSION_PERSISTENCE_DIR=./sessions
+SESSION_TIMEOUT_MINUTES=480
+SESSION_CLEANUP_ENABLED=true
+
 # TTS (Optional)
 ENABLE_TTS=false                    # Set to 'true' to enable AWS Polly
 AWS_REGION=us-east-1
@@ -1019,16 +1042,72 @@ AWS_IDENTITY_POOL_ID=               # Cognito Identity Pool ID
 AWS_USER_POOL_ID=                   # Cognito User Pool ID
 AWS_JWT_TOKEN=                      # JWT token (optional)
 
-# Security
-ENABLE_AUTH=false
-AUTO_GENERATE_SESSION_IDS=false     # Accept client-provided session IDs
-SESSION_TIMEOUT_MINUTES=480
-
 # Rate Limiting
 WEBSOCKET_RATE_LIMIT_PER_SECOND=10
 POLLY_RATE_LIMIT_PER_MINUTE=60
 MAX_CLIENTS_PER_SESSION=50
 ```
+
+### Cognito Setup
+
+The WebSocket server requires AWS Cognito for admin authentication. Follow these steps to configure:
+
+**1. Deploy Cognito Stack (if not already deployed):**
+
+```bash
+cd src/backend
+npm install
+cdk bootstrap  # First time only
+npm run deploy
+```
+
+Note the Cognito User Pool ID and Client ID from the CDK output.
+
+**2. Run Unified Setup Script:**
+
+```bash
+cd src/websocket-server
+./setup-unified-auth.sh
+```
+
+The script will:
+- Parse Cognito configuration from CDK output
+- Generate `.env` file with Cognito values
+- Create necessary directories
+- Optionally create a Cognito user
+
+**3. Verify Cognito Configuration:**
+
+```bash
+# Check environment variables
+cat .env | grep COGNITO
+
+# Verify Cognito User Pool exists
+aws cognito-idp describe-user-pool \
+  --user-pool-id us-east-1_xxxxxx \
+  --region us-east-1
+
+# Verify User Pool Client configuration
+aws cognito-idp describe-user-pool-client \
+  --user-pool-id us-east-1_xxxxxx \
+  --client-id xxxxxxxxxxxxxxxxxxxxxxxxxx \
+  --region us-east-1
+```
+
+**4. Create Admin Users:**
+
+```bash
+# Create a new Cognito user
+aws cognito-idp admin-create-user \
+  --user-pool-id us-east-1_xxxxxx \
+  --username admin@example.com \
+  --user-attributes Name=email,Value=admin@example.com \
+  --temporary-password TempPassword123!
+
+# User will need to change password on first login
+```
+
+**Important**: All users in the Cognito User Pool have admin access to the WebSocket server.
 
 ### TTS Modes
 
@@ -2164,4 +2243,3 @@ SECURITY_LOG_MAX_SIZE=10000
 3. Review session ownership in session files
 4. Ensure token contains correct admin ID
 5. Check for token version mismatches
-

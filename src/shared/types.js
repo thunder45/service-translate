@@ -15,6 +15,11 @@ var AdminErrorCode;
     AdminErrorCode["AUTH_SESSION_NOT_FOUND"] = "AUTH_1006";
     AdminErrorCode["AUTH_RATE_LIMITED"] = "AUTH_1007";
     AdminErrorCode["AUTH_ACCOUNT_LOCKED"] = "AUTH_1008";
+    // Cognito-Specific Errors (1010-1019)
+    AdminErrorCode["COGNITO_USER_NOT_FOUND"] = "COGNITO_1010";
+    AdminErrorCode["COGNITO_USER_DISABLED"] = "COGNITO_1011";
+    AdminErrorCode["COGNITO_UNAVAILABLE"] = "COGNITO_1012";
+    AdminErrorCode["COGNITO_INSUFFICIENT_PERMISSIONS"] = "COGNITO_1013";
     // Authorization Errors (1100-1199)
     AdminErrorCode["AUTHZ_ACCESS_DENIED"] = "AUTHZ_1101";
     AdminErrorCode["AUTHZ_SESSION_NOT_OWNED"] = "AUTHZ_1102";
@@ -88,6 +93,27 @@ exports.ERROR_MESSAGES = {
     [AdminErrorCode.AUTH_ACCOUNT_LOCKED]: {
         message: 'Account has been locked due to security reasons',
         userMessage: 'Account locked. Please contact administrator.',
+        retryable: false
+    },
+    [AdminErrorCode.COGNITO_USER_NOT_FOUND]: {
+        message: 'User not found in Cognito User Pool',
+        userMessage: 'User account not found. Please contact administrator.',
+        retryable: false
+    },
+    [AdminErrorCode.COGNITO_USER_DISABLED]: {
+        message: 'User account is disabled in Cognito',
+        userMessage: 'Your account has been disabled. Please contact administrator.',
+        retryable: false
+    },
+    [AdminErrorCode.COGNITO_UNAVAILABLE]: {
+        message: 'Unable to connect to Cognito authentication service',
+        userMessage: 'Authentication service unavailable. Please try again later.',
+        retryable: true,
+        retryAfter: 60
+    },
+    [AdminErrorCode.COGNITO_INSUFFICIENT_PERMISSIONS]: {
+        message: 'User does not have required Cognito permissions',
+        userMessage: 'Insufficient permissions. Please contact administrator.',
         retryable: false
     },
     [AdminErrorCode.AUTHZ_ACCESS_DENIED]: {

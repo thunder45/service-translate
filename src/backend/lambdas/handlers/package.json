@@ -1,6 +1,9 @@
 {
   "name": "service-translate-handlers",
   "version": "1.0.0",
+  "scripts": {
+    "build": "tsc --target ES2020 --module commonjs --esModuleInterop --skipLibCheck *.ts"
+  },
   "dependencies": {
     "@aws-sdk/client-apigatewaymanagementapi": "^3.0.0",
     "@aws-sdk/client-dynamodb": "^3.0.0",
@@ -8,5 +11,8 @@
     "@aws-sdk/lib-dynamodb": "^3.0.0",
     "aws-jwt-verify": "^4.0.0",
     "qrcode": "^1.5.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
   }
 }

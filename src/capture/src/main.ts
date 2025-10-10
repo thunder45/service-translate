@@ -263,12 +263,37 @@ ipcMain.handle('logout', async () => {
 // Admin authentication handlers
 ipcMain.handle('admin-authenticate', async (_, credentials: { username: string; password: string }) => {
   try {
-    if (!webSocketManager) {
-      throw new Error('WebSocket manager not initialized. Please connect to server first.');
+    // Load config to get Cognito settings
+    const config = await loadConfig();
+    
+    if (!config || !config.userPoolId || !config.clientId || !config.region) {
+      throw new Error('Cognito not configured. Please configure User Pool ID and Client ID in Advanced settings.');
+    }
+    
+    // Initialize cognitoAuth if not already done
+    if (!cognitoAuth) {
+      cognitoAuth = new CognitoAuth({
+        userPoolId: config.userPoolId,
+        clientId: config.clientId,
+        region: config.region,
+      });
     }
 
-    const result = await webSocketManager.adminAuthenticate(credentials.username, credentials.password);
-    return result;
+    // Authenticate directly with Cognito
+    const tokens = await cognitoAuth.login(credentials.username, credentials.password);
+    
+    // Store config and token globally for streaming manager
+    (global as any).config = config;
+    (global as any).authToken = tokens.idToken; // Identity Pool needs ID token
+    
+    return {
+      success: true,
+      username: credentials.username,
+      token: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      tokenExpiry: Date.now() + (tokens.expiresIn * 1000),
+      adminId: credentials.username
+    };
   } catch (error: any) {
     console.error('Admin authentication error:', error);
     return { success: false, error: error.message };
@@ -285,20 +310,6 @@ ipcMain.handle('admin-authenticate-with-token', async (_, data: { token: string 
     return result;
   } catch (error: any) {
     console.error('Admin token authentication error:', error);
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('refresh-admin-token', async (_, data: { refreshToken: string; adminId: string }) => {
-  try {
-    if (!webSocketManager) {
-      throw new Error('WebSocket manager not initialized');
-    }
-
-    const result = await webSocketManager.refreshAdminToken(data.refreshToken, data.adminId);
-    return result;
-  } catch (error: any) {
-    console.error('Token refresh error:', error);
     return { success: false, error: error.message };
   }
 });
@@ -333,6 +344,20 @@ ipcMain.handle('clear-admin-tokens', async () => {
   }
 });
 
+ipcMain.handle('refresh-admin-token', async (_, data: { refreshToken: string; adminId?: string }) => {
+  try {
+    if (!webSocketManager) {
+      throw new Error('WebSocket manager not initialized. Please connect to server first.');
+    }
+
+    const result = await webSocketManager.refreshCognitoToken();
+    return result;
+  } catch (error: any) {
+    console.error('Token refresh error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('login', async (_, credentials) => {
   if (!cognitoAuth) {
     cognitoAuth = new CognitoAuth({
@@ -342,16 +367,16 @@ ipcMain.handle('login', async (_, credentials) => {
     });
   }
 
-  const token = await cognitoAuth.login(credentials.username, credentials.password);
+  const tokens = await cognitoAuth.login(credentials.username, credentials.password);
   
   // Store credentials securely
-  storeCredentials(credentials.username, token);
+  storeCredentials(credentials.username, tokens.accessToken);
   
   // Store token globally for streaming manager
-  (global as any).authToken = token;
+  (global as any).authToken = tokens.accessToken;
   (global as any).config = credentials;
   
-  return { success: true, token };
+  return { success: true, token: tokens.accessToken };
 });
 
 ipcMain.handle('change-password', async (_, credentials) => {
@@ -391,7 +416,7 @@ ipcMain.handle('connect-websocket', async () => {
         serverUrl,
         reconnectAttempts: 5,
         reconnectDelay: 1000
-      });
+      }, app.getPath('userData'));
       
       // Setup event listeners for UI updates
       webSocketManager.on('connected', () => {
@@ -433,20 +458,17 @@ ipcMain.handle('disconnect-websocket', async () => {
   return { success: false, error: 'WebSocket manager not initialized' };
 });
 
-ipcMain.handle('create-session', async (_, sessionId) => {
+ipcMain.handle('create-session', async (_, sessionId, providedConfig) => {
   if (webSocketManager) {
     try {
-      // Get current config for session
-      const config = (global as any).config;
-      if (!config || !config.tts) {
-        throw new Error('TTS configuration not found');
-      }
-
+      // Use provided config or load from disk as fallback
+      const config = providedConfig || await loadConfig();
+      
       const sessionConfig = {
         sessionId,
-        enabledLanguages: config.targetLanguages || ['en', 'es', 'fr', 'de', 'it'],
-        ttsMode: config.tts.mode || 'neural',
-        audioQuality: (config.tts.mode === 'neural' ? 'high' : 'medium') as 'high' | 'medium'
+        enabledLanguages: (config?.targetLanguages || ['en', 'es', 'fr', 'de', 'it']) as any,
+        ttsMode: config?.tts?.mode || 'neural',
+        audioQuality: (config?.tts?.mode === 'neural' ? 'high' : 'medium') as 'high' | 'medium'
       };
 
       await webSocketManager.createSession(sessionId, sessionConfig);
@@ -474,7 +496,43 @@ ipcMain.handle('list-sessions', async () => {
   if (webSocketManager) {
     try {
       const sessions = await webSocketManager.listSessions();
-      return { success: true, sessions };
+      
+      // Separate owned and all sessions based on isOwner flag
+      const ownedSessions = sessions.filter((s: any) => s.isOwner);
+      
+      return { 
+        success: true, 
+        sessions,
+        ownedSessions,
+        allSessions: sessions
+      };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+  return { success: false, error: 'WebSocket manager not initialized' };
+});
+
+ipcMain.handle('set-current-session', async (_, sessionConfig) => {
+  if (webSocketManager) {
+    try {
+      // Directly set the current session without sending a message
+      // This is used when reconnecting to an existing session
+      (webSocketManager as any).currentSession = sessionConfig;
+      (webSocketManager as any).sessionStateBackup = { ...sessionConfig };
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+  return { success: false, error: 'WebSocket manager not initialized' };
+});
+
+ipcMain.handle('update-session-config', async (_, sessionConfig) => {
+  if (webSocketManager) {
+    try {
+      await webSocketManager.updateSessionConfig(sessionConfig);
+      return { success: true };
     } catch (error: any) {
       return { success: false, error: error.message };
     }
@@ -698,8 +756,12 @@ function loadStoredAdminTokens(): AdminTokenData | null {
       const decrypted = safeStorage.decryptString(encrypted);
       const data: AdminTokenData = JSON.parse(decrypted);
       
-      // Check if token is not too old (within 24 hours)
-      if (Date.now() - data.timestamp < 24 * 60 * 60 * 1000) {
+      // Check if stored within 4 hours
+      // This ensures refresh tokens are still valid (Cognito refresh tokens valid for 30 days)
+      const withinStorageWindow = Date.now() - data.timestamp < 4 * 60 * 60 * 1000;
+      
+      if (withinStorageWindow) {
+        // Return tokens even if access token expired - refresh token will be used
         return data;
       }
     }

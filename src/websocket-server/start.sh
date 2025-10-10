@@ -6,30 +6,45 @@ echo "Starting Service Translate WebSocket Server..."
 
 # Check if Node.js is installed
 if ! command -v node &> /dev/null; then
-    echo "Error: Node.js is not installed. Please install Node.js first."
+    echo "❌ Node.js is not installed. Please install Node.js first."
     exit 1
 fi
 
 # Check if npm is installed
 if ! command -v npm &> /dev/null; then
-    echo "Error: npm is not installed. Please install npm first."
+    echo "❌ npm is not installed. Please install npm first."
     exit 1
 fi
 
 # Install dependencies if node_modules doesn't exist
 if [ ! -d "node_modules" ]; then
     echo "Installing dependencies..."
-    npm install
+    npm install || {
+        echo "❌ Failed to install dependencies"
+        exit 1
+    }
 fi
 
-# Build the project if dist doesn't exist or src is newer
-if [ ! -d "dist" ] || [ "src" -nt "dist" ]; then
+# Build the project if dist doesn't exist or needs rebuild
+if [ ! -d "dist" ]; then
     echo "Building project..."
-    npm run build
+    npm run build || {
+        echo "❌ Build failed"
+        exit 1
+    }
+else
+    # Check if any TypeScript file is newer than dist
+    if [ -n "$(find src -name '*.ts' -newer dist 2>/dev/null)" ]; then
+        echo "Source files changed, rebuilding..."
+        npm run build || {
+            echo "❌ Build failed"
+            exit 1
+        }
+    fi
 fi
 
-# Create sessions directory if it doesn't exist
-mkdir -p sessions
+# Create required directories
+mkdir -p sessions admin-identities logs
 
 # Start the server
 echo "Starting WebSocket server on port ${PORT:-3001}..."

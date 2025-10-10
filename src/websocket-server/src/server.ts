@@ -2,6 +2,7 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import cors from 'cors';
+import { config } from 'dotenv';
 import { SessionManager } from './session-manager';
 import { MessageRouter } from './message-router';
 import { AudioManager } from './audio-manager';
@@ -9,14 +10,112 @@ import { ServerErrorLogger } from './error-logger';
 import { SecurityMiddleware, SecurityConfig } from './security-middleware';
 import { PollyService } from './polly-service';
 import { AdminIdentityStore } from './admin-identity-store';
-import { AdminIdentityManager, JWTConfig } from './admin-identity-manager';
+import { AdminIdentityManager } from './admin-identity-manager';
 import { AuthManager, AuthConfig } from './auth-manager';
-import * as crypto from 'crypto';
-import * as fs from 'fs';
+import { CognitoAuthService } from './cognito-auth';
+import { TokenStore } from './token-store';
 import * as path from 'path';
+
+// Load environment variables
+config();
 
 const app = express();
 const server = createServer(app);
+
+// Validate Cognito configuration on startup (fail fast if missing)
+function validateCognitoConfig(): void {
+  const requiredVars = [
+    'COGNITO_REGION',
+    'COGNITO_USER_POOL_ID',
+    'COGNITO_CLIENT_ID'
+  ];
+
+  const missing: string[] = [];
+  
+  for (const varName of requiredVars) {
+    if (!process.env[varName]) {
+      missing.push(varName);
+    }
+  }
+
+  if (missing.length > 0) {
+    console.error('');
+    console.error('========================================');
+    console.error('COGNITO CONFIGURATION ERROR');
+    console.error('========================================');
+    console.error('');
+    console.error('Missing required Cognito environment variables:');
+    missing.forEach(varName => console.error(`  - ${varName}`));
+    console.error('');
+    console.error('These values are obtained from the CDK deployment output.');
+    console.error('');
+    console.error('Setup Instructions:');
+    console.error('  1. Deploy the backend CDK stack:');
+    console.error('     cd src/backend && npm run deploy');
+    console.error('');
+    console.error('  2. Copy the Cognito values from CDK output to .env:');
+    console.error('     COGNITO_REGION=us-east-1');
+    console.error('     COGNITO_USER_POOL_ID=us-east-1_xxxxxx');
+    console.error('     COGNITO_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxx');
+    console.error('');
+    console.error('  3. Ensure User Pool Client is configured as:');
+    console.error('     - Client Type: Public client (no secret)');
+    console.error('     - Auth Flows: ALLOW_USER_PASSWORD_AUTH, ALLOW_REFRESH_TOKEN_AUTH');
+    console.error('');
+    console.error('========================================');
+    console.error('');
+    process.exit(1);
+  }
+
+  console.log('✓ Cognito configuration validated');
+  console.log(`  Region: ${process.env.COGNITO_REGION}`);
+  console.log(`  User Pool ID: ${process.env.COGNITO_USER_POOL_ID}`);
+  console.log(`  Client ID: ${process.env.COGNITO_CLIENT_ID}`);
+  console.log('');
+}
+
+// Validate configuration before starting server
+validateCognitoConfig();
+
+// Check for deprecated environment variables and warn
+function checkDeprecatedEnvVars(): void {
+  const deprecatedVars = [
+    'ADMIN_USERNAME',
+    'ADMIN_PASSWORD',
+    'JWT_SECRET',
+    'JWT_ALGORITHM',
+    'JWT_ISSUER',
+    'JWT_AUDIENCE',
+    'JWT_ACCESS_TOKEN_EXPIRY',
+    'JWT_REFRESH_TOKEN_EXPIRY'
+  ];
+
+  const foundDeprecated: string[] = [];
+  
+  for (const varName of deprecatedVars) {
+    if (process.env[varName]) {
+      foundDeprecated.push(varName);
+    }
+  }
+
+  if (foundDeprecated.length > 0) {
+    console.warn('');
+    console.warn('========================================');
+    console.warn('DEPRECATED ENVIRONMENT VARIABLES');
+    console.warn('========================================');
+    console.warn('');
+    console.warn('The following environment variables are deprecated and will be ignored:');
+    foundDeprecated.forEach(varName => console.warn(`  - ${varName}`));
+    console.warn('');
+    console.warn('These variables are no longer used. Authentication is now handled by Cognito.');
+    console.warn('Please remove them from your .env file.');
+    console.warn('');
+    console.warn('========================================');
+    console.warn('');
+  }
+}
+
+checkDeprecatedEnvVars();
 
 // Initialize error logger
 const errorLogger = new ServerErrorLogger();
@@ -24,29 +123,6 @@ const errorLogger = new ServerErrorLogger();
 // Initialize session manager and audio manager
 const sessionManager = new SessionManager();
 const audioManager = new AudioManager();
-
-// Initialize JWT secret (generate if not exists)
-const JWT_SECRET_PATH = path.join(__dirname, '..', '.jwt-secret');
-let jwtSecret: string;
-
-if (fs.existsSync(JWT_SECRET_PATH)) {
-  jwtSecret = fs.readFileSync(JWT_SECRET_PATH, 'utf-8').trim();
-} else {
-  // Generate 256-bit random secret
-  jwtSecret = crypto.randomBytes(32).toString('hex');
-  fs.writeFileSync(JWT_SECRET_PATH, jwtSecret, { mode: 0o600 });
-  console.log('Generated new JWT secret');
-}
-
-// Initialize JWT configuration
-const jwtConfig: JWTConfig = {
-  secret: jwtSecret,
-  algorithm: 'HS256',
-  issuer: 'service-translate-ws',
-  audience: 'service-translate-admin',
-  accessTokenExpiry: process.env.JWT_ACCESS_TOKEN_EXPIRY || '1h',
-  refreshTokenExpiry: process.env.JWT_REFRESH_TOKEN_EXPIRY || '30d'
-};
 
 // Initialize Auth Manager
 const authConfig: AuthConfig = {
@@ -57,18 +133,31 @@ const authConfig: AuthConfig = {
 };
 const authManager = new AuthManager(authConfig);
 
+// Initialize Cognito Authentication Service
+const cognitoAuth = new CognitoAuthService({
+  region: process.env.COGNITO_REGION!,
+  userPoolId: process.env.COGNITO_USER_POOL_ID!,
+  clientId: process.env.COGNITO_CLIENT_ID!
+});
+
+// Initialize Token Store (in-memory)
+const tokenStore = new TokenStore();
+
 // Initialize Admin Identity Store and Manager
 const adminIdentityStore = new AdminIdentityStore(
   path.join(__dirname, '..', 'admin-identities')
 );
-const adminIdentityManager = new AdminIdentityManager(adminIdentityStore, jwtConfig);
+const adminIdentityManager = new AdminIdentityManager(
+  adminIdentityStore,
+  cognitoAuth,
+  tokenStore
+);
 
 // Initialize Polly service (optional)
 const pollyService = new PollyService({
   region: process.env.AWS_REGION || 'us-east-1',
   identityPoolId: process.env.AWS_IDENTITY_POOL_ID || '',
   userPoolId: process.env.AWS_USER_POOL_ID || '',
-  jwtToken: process.env.AWS_JWT_TOKEN || '',
   enabled: process.env.ENABLE_TTS === 'true'
 });
 
@@ -128,7 +217,15 @@ const io = new SocketIOServer(server, {
 });
 
 // Initialize message router with all dependencies
-const messageRouter = new MessageRouter(io, sessionManager, authManager, adminIdentityManager, audioManager, errorLogger);
+const messageRouter = new MessageRouter(
+  io,
+  sessionManager,
+  authManager,
+  adminIdentityManager,
+  cognitoAuth,
+  audioManager,
+  errorLogger
+);
 
 const PORT = process.env.PORT || 3001;
 
@@ -233,7 +330,7 @@ app.get('/export', async (req, res) => {
 });
 
 // Socket.IO connection handling
-io.on('connection', (socket) => {
+io.on('connection', async (socket) => {
   console.log(`=== CLIENT CONNECTED: ${socket.id} ===`);
   console.log(`Remote address: ${socket.handshake.address}`);
   console.log(`User agent: ${socket.handshake.headers['user-agent']}`);
@@ -251,34 +348,11 @@ io.on('connection', (socket) => {
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.substring(7);
       try {
-        // Attempt to register admin connection with token
-        adminIdentity = adminIdentityManager.registerAdminConnectionWithToken(token, socket.id);
+        // Attempt to authenticate admin connection with token
+        const authResult = await adminIdentityManager.authenticateWithToken(token, socket.id);
+        adminIdentity = adminIdentityManager.getAdminIdentity(authResult.adminId);
         isAdminConnection = true;
-        console.log(`Admin authenticated with token: ${adminIdentity.username} (${adminIdentity.adminId})`);
-        
-        // Schedule token expiry warning
-        const tokenExpiry = adminIdentityManager.getTokenExpiry(token);
-        if (tokenExpiry) {
-          adminIdentityManager.scheduleExpiryWarning(
-            adminIdentity.adminId,
-            tokenExpiry,
-            (adminId, expiresAt, timeRemaining) => {
-              // Send expiry warning to all admin sockets
-              adminIdentityManager.notifyAdminConnections(adminId, (socketId) => {
-                const targetSocket = io.sockets.sockets.get(socketId);
-                if (targetSocket) {
-                  targetSocket.emit('token-expiry-warning', {
-                    type: 'token-expiry-warning',
-                    adminId,
-                    expiresAt: expiresAt.toISOString(),
-                    timeRemaining,
-                    timestamp: new Date().toISOString()
-                  });
-                }
-              });
-            }
-          );
-        }
+        console.log(`Admin authenticated with token: ${adminIdentity?.cognitoUsername} (${authResult.adminId})`);
       } catch (tokenError) {
         console.log(`Token authentication failed: ${tokenError instanceof Error ? tokenError.message : 'Unknown error'}`);
         // Token authentication failed, but connection can continue for credential-based auth
@@ -303,7 +377,7 @@ io.on('connection', (socket) => {
       securityEnabled: securityConfig.auth.enabled,
       isAdmin: isAdminConnection,
       adminId: adminIdentity?.adminId,
-      username: adminIdentity?.username
+      username: adminIdentity?.cognitoUsername
     });
   } catch (error) {
     console.error(`Connection rejected for ${socket.id}:`, error);
@@ -438,57 +512,9 @@ io.on('connection', (socket) => {
     messageRouter.routeMessage(socket, 'generate-tts', data);
   }));
   
-  socket.on('broadcast-translation', secureMessageHandler('broadcast-translation', async (data) => {
+  socket.on('broadcast-translation', secureMessageHandler('broadcast-translation', (data) => {
     console.log(`[${socket.id}] ← broadcast-translation:`, JSON.stringify(data, null, 2));
-    
-    // Generate TTS if enabled and requested
-    if (data.generateTTS && pollyService.isEnabled() && data.translations) {
-      const audioResults: any[] = [];
-      
-      for (const [language, text] of Object.entries(data.translations)) {
-        try {
-          const audioBuffer = await pollyService.generateAudio(
-            text as string, 
-            language, 
-            data.voiceType || 'neural'
-          );
-          
-          if (audioBuffer) {
-            const audioInfo = await audioManager.storeAudioFile(
-              audioBuffer,
-              text as string,
-              language as any,
-              data.voiceType || 'neural',
-              'mp3'
-            );
-            
-            audioResults.push({
-              language,
-              text,
-              audioUrl: audioInfo.url,
-              audioMetadata: {
-                audioId: audioInfo.id,
-                url: audioInfo.url,
-                duration: audioInfo.duration,
-                format: audioInfo.format,
-                voiceType: audioInfo.voiceType,
-                size: audioInfo.size
-              }
-            });
-          } else {
-            // TTS failed, send text only
-            audioResults.push({ language, text, audioUrl: null });
-          }
-        } catch (error) {
-          console.error(`TTS generation failed for ${language}:`, error);
-          audioResults.push({ language, text, audioUrl: null });
-        }
-      }
-      
-      // Broadcast with audio
-      data.audioResults = audioResults;
-    }
-    
+    // TTS generation is now handled in message-router.ts
     messageRouter.routeMessage(socket, 'broadcast-translation', data);
   }));
 
@@ -513,13 +539,13 @@ io.on('connection', (socket) => {
     
     // Clean up admin connection
     if (disconnectingAdmin) {
-      console.log(`Cleaning up admin connection: ${disconnectingAdmin.username} (${disconnectingAdmin.adminId})`);
+      console.log(`Cleaning up admin connection: ${disconnectingAdmin.cognitoUsername} (${disconnectingAdmin.adminId})`);
       adminIdentityManager.removeAdminConnection(socket.id);
       
       // Check if admin has other active connections
       const hasOtherConnections = adminIdentityManager.hasActiveConnections(disconnectingAdmin.adminId);
       if (!hasOtherConnections) {
-        console.log(`Admin ${disconnectingAdmin.username} has no more active connections`);
+        console.log(`Admin ${disconnectingAdmin.cognitoUsername} has no more active connections`);
       }
     }
     
@@ -538,6 +564,17 @@ io.on('connection', (socket) => {
 server.listen(PORT, () => {
   console.log(`Service Translate WebSocket Server running on port ${PORT}`);
   console.log(`Health check available at http://localhost:${PORT}/health`);
+  
+  // Broadcast server restart notification to all connected clients
+  // This forces clients to re-authenticate since all tokens were cleared on restart
+  setTimeout(() => {
+    io.emit('server-restarted', {
+      message: 'Server has restarted. Please re-authenticate.',
+      timestamp: new Date().toISOString(),
+      requiresReauth: true
+    });
+    console.log('Server restart notification sent to all connected clients');
+  }, 1000); // Delay to ensure clients are connected
 });
 
 // Cleanup inactive sessions every hour

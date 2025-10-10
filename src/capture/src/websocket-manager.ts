@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import { io, Socket } from 'socket.io-client';
+import { SecureTokenStorage } from './secure-token-storage';
 
 export type TargetLanguage = 'en-US' | 'es-ES' | 'fr-FR' | 'de-DE' | 'it-IT';
 export type TTSMode = 'neural' | 'standard' | 'local' | 'disabled';
@@ -62,8 +63,9 @@ interface AdminAuthState {
   isAuthenticated: boolean;
   adminId: string | null;
   username: string | null;
-  token: string | null;
-  refreshToken: string | null;
+  cognitoAccessToken: string | null;
+  cognitoIdToken: string | null;
+  cognitoRefreshToken: string | null;
   tokenExpiry: Date | null;
 }
 
@@ -75,13 +77,16 @@ export class WebSocketManager extends EventEmitter {
   private reconnectAttempts = 0;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private healthCheckTimer: NodeJS.Timeout | null = null;
+  private tokenRefreshTimer: NodeJS.Timeout | null = null;
   private connectionHealth: ConnectionHealthStatus;
   private sessionStateBackup: SessionConfig | null = null;
   private adminAuthState: AdminAuthState;
+  private tokenStorage: SecureTokenStorage;
 
-  constructor(config: WebSocketConfig) {
+  constructor(config: WebSocketConfig, appDataPath: string) {
     super();
     this.config = config;
+    this.tokenStorage = new SecureTokenStorage(appDataPath);
     this.connectionHealth = {
       connected: false,
       lastPing: 0,
@@ -97,14 +102,15 @@ export class WebSocketManager extends EventEmitter {
       isAuthenticated: false,
       adminId: null,
       username: null,
-      token: null,
-      refreshToken: null,
+      cognitoAccessToken: null,
+      cognitoIdToken: null,
+      cognitoRefreshToken: null,
       tokenExpiry: null
     };
   }
 
   /**
-   * Admin authentication with credentials
+   * Admin authentication with Cognito credentials
    */
   async adminAuthenticate(username: string, password: string): Promise<any> {
     if (!this.isConnected || !this.socket) {
@@ -120,25 +126,41 @@ export class WebSocketManager extends EventEmitter {
         clearTimeout(timeout);
         
         if (response.success) {
+          // Calculate token expiry from expiresIn (seconds)
+          const tokenExpiry = new Date(Date.now() + response.expiresIn * 1000);
+          
+          // Update auth state with Cognito tokens
           this.adminAuthState = {
             isAuthenticated: true,
             adminId: response.adminId,
-            username: response.username,
-            token: response.token,
-            refreshToken: response.refreshToken,
-            tokenExpiry: response.tokenExpiry ? new Date(response.tokenExpiry) : null
+            username: username,
+            cognitoAccessToken: response.accessToken,
+            cognitoIdToken: response.idToken,
+            cognitoRefreshToken: response.refreshToken,
+            tokenExpiry
           };
+          
+          // Store tokens in encrypted file storage
+          this.tokenStorage.storeTokens({
+            accessToken: response.accessToken,
+            idToken: response.idToken,
+            refreshToken: response.refreshToken,
+            expiresAt: tokenExpiry,
+            username
+          });
+          
+          // Start automatic token refresh monitoring
+          this.startTokenRefreshMonitoring();
           
           resolve({
             success: true,
             adminId: response.adminId,
-            username: response.username,
-            token: response.token,
+            username,
+            accessToken: response.accessToken,
+            idToken: response.idToken,
             refreshToken: response.refreshToken,
-            tokenExpiry: response.tokenExpiry,
-            ownedSessions: response.ownedSessions,
-            allSessions: response.allSessions,
-            permissions: response.permissions
+            expiresIn: response.expiresIn,
+            ownedSessions: response.ownedSessions
           });
         } else {
           reject(new Error(response.error || 'Authentication failed'));
@@ -160,11 +182,21 @@ export class WebSocketManager extends EventEmitter {
   }
 
   /**
-   * Admin authentication with token
+   * Admin authentication with stored Cognito token
    */
-  async adminAuthenticateWithToken(token: string): Promise<any> {
+  async adminAuthenticateWithToken(accessToken?: string): Promise<any> {
     if (!this.isConnected || !this.socket) {
       throw new Error('Not connected to WebSocket server');
+    }
+
+    // Use provided token or load from storage
+    let tokenToUse = accessToken;
+    if (!tokenToUse) {
+      const storedTokens = this.tokenStorage.loadTokens();
+      if (!storedTokens) {
+        throw new Error('No stored tokens available');
+      }
+      tokenToUse = storedTokens.accessToken;
     }
 
     return new Promise((resolve, reject) => {
@@ -176,27 +208,34 @@ export class WebSocketManager extends EventEmitter {
         clearTimeout(timeout);
         
         if (response.success) {
+          // Load stored tokens to get refresh token
+          const storedTokens = this.tokenStorage.loadTokens();
+          
           this.adminAuthState = {
             isAuthenticated: true,
             adminId: response.adminId,
-            username: response.username,
-            token: response.token || token,
-            refreshToken: response.refreshToken,
-            tokenExpiry: response.tokenExpiry ? new Date(response.tokenExpiry) : null
+            username: storedTokens?.username || null,
+            cognitoAccessToken: tokenToUse!,
+            cognitoIdToken: storedTokens?.idToken || null,
+            cognitoRefreshToken: storedTokens?.refreshToken || null,
+            tokenExpiry: storedTokens?.expiresAt || null
           };
+          
+          // Token refresh is handled by the renderer process, not here
+          // this.startTokenRefreshMonitoring();
           
           resolve({
             success: true,
             adminId: response.adminId,
-            username: response.username,
-            token: response.token || token,
-            refreshToken: response.refreshToken,
-            tokenExpiry: response.tokenExpiry,
-            ownedSessions: response.ownedSessions,
-            allSessions: response.allSessions,
-            permissions: response.permissions
+            username: storedTokens?.username,
+            ownedSessions: response.ownedSessions
           });
         } else {
+          // Token authentication failed - might be expired or invalid
+          if (response.error?.includes('expired') || response.error?.includes('invalid')) {
+            // Clear invalid tokens
+            this.tokenStorage.clearTokens();
+          }
           reject(new Error(response.error || 'Token authentication failed'));
         }
       });
@@ -204,7 +243,7 @@ export class WebSocketManager extends EventEmitter {
       this.socket!.emit('admin-auth', {
         type: 'admin-auth',
         method: 'token',
-        token,
+        token: tokenToUse,
         clientInfo: {
           appVersion: '1.0.0',
           platform: process.platform,
@@ -215,11 +254,17 @@ export class WebSocketManager extends EventEmitter {
   }
 
   /**
-   * Refresh admin token
+   * Refresh Cognito access token using refresh token
    */
-  async refreshAdminToken(refreshToken: string, adminId: string): Promise<any> {
+  async refreshCognitoToken(): Promise<any> {
     if (!this.isConnected || !this.socket) {
       throw new Error('Not connected to WebSocket server');
+    }
+
+    // Get refresh token from storage
+    const storedTokens = this.tokenStorage.loadTokens();
+    if (!storedTokens || !storedTokens.refreshToken) {
+      throw new Error('No refresh token available');
     }
 
     return new Promise((resolve, reject) => {
@@ -231,25 +276,42 @@ export class WebSocketManager extends EventEmitter {
         clearTimeout(timeout);
         
         if (response.success) {
-          this.adminAuthState.token = response.token;
-          this.adminAuthState.refreshToken = response.refreshToken || refreshToken;
-          this.adminAuthState.tokenExpiry = response.tokenExpiry ? new Date(response.tokenExpiry) : null;
+          // Calculate new token expiry
+          const tokenExpiry = new Date(Date.now() + response.expiresIn * 1000);
+          
+          // Update auth state
+          this.adminAuthState.cognitoAccessToken = response.accessToken;
+          this.adminAuthState.tokenExpiry = tokenExpiry;
+          
+          // Update stored tokens (only access token changes)
+          this.tokenStorage.updateAccessToken(response.accessToken, response.expiresIn);
+          
+          console.log('Cognito token refreshed successfully');
+          this.emit('token-refreshed', { expiresIn: response.expiresIn });
           
           resolve({
             success: true,
-            token: response.token,
-            refreshToken: response.refreshToken,
-            tokenExpiry: response.tokenExpiry
+            accessToken: response.accessToken,
+            expiresIn: response.expiresIn
           });
         } else {
+          // Refresh token might be expired
+          if (response.error?.includes('expired') || response.error?.includes('invalid')) {
+            console.error('Refresh token expired or invalid');
+            this.adminAuthState.isAuthenticated = false;
+            this.tokenStorage.clearTokens();
+            this.emit('session-expired', { 
+              message: 'Session expired, please login again',
+              reason: 'refresh_token_expired'
+            });
+          }
           reject(new Error(response.error || 'Token refresh failed'));
         }
       });
 
       this.socket!.emit('token-refresh', {
         type: 'token-refresh',
-        refreshToken,
-        adminId
+        refreshToken: storedTokens.refreshToken
       });
     });
   }
@@ -314,6 +376,11 @@ export class WebSocketManager extends EventEmitter {
     if (this.healthCheckTimer) {
       clearInterval(this.healthCheckTimer);
       this.healthCheckTimer = null;
+    }
+
+    if (this.tokenRefreshTimer) {
+      clearInterval(this.tokenRefreshTimer);
+      this.tokenRefreshTimer = null;
     }
 
     if (this.socket) {
@@ -481,7 +548,7 @@ export class WebSocketManager extends EventEmitter {
         reject(new Error('List sessions timeout'));
       }, 5000);
 
-      this.socket!.once('sessions-list', (data: any) => {
+      this.socket!.once('list-sessions-response', (data: any) => {
         clearTimeout(timeout);
         resolve(data.sessions || []);
       });
@@ -768,19 +835,52 @@ export class WebSocketManager extends EventEmitter {
    * Recover session state after reconnection
    */
   private async recoverSessionState(): Promise<void> {
-    // If admin is authenticated, try to re-authenticate with token
-    if (this.adminAuthState.isAuthenticated && this.adminAuthState.token) {
-      try {
-        console.log('Re-authenticating admin after reconnection...');
-        await this.adminAuthenticateWithToken(this.adminAuthState.token);
+    // Try to re-authenticate with stored Cognito tokens
+    try {
+      const storedTokens = this.tokenStorage.loadTokens();
+      
+      if (storedTokens) {
+        console.log('Re-authenticating admin with stored Cognito tokens...');
+        
+        // Check if access token is expired
+        if (storedTokens.expiresAt < new Date()) {
+          console.log('Stored access token expired, attempting refresh...');
+          
+          // Try to refresh the token first
+          try {
+            await this.refreshCognitoToken();
+            console.log('Token refreshed, now authenticating...');
+            
+            // Authenticate with refreshed token
+            await this.adminAuthenticateWithToken();
+          } catch (refreshError) {
+            console.error('Token refresh failed:', refreshError);
+            
+            // If refresh fails, clear tokens and emit session expired
+            this.tokenStorage.clearTokens();
+            this.adminAuthState.isAuthenticated = false;
+            this.emit('session-expired', {
+              message: 'Session expired, please login again',
+              reason: 'reconnection_token_refresh_failed'
+            });
+            return;
+          }
+        } else {
+          // Token still valid, authenticate directly
+          await this.adminAuthenticateWithToken(storedTokens.accessToken);
+        }
+        
         console.log('Admin re-authenticated successfully');
-      } catch (error) {
-        console.error('Failed to re-authenticate admin:', error);
-        this.adminAuthState.isAuthenticated = false;
-        this.emit('admin-auth-failed', error);
+      } else {
+        console.log('No stored tokens available for re-authentication');
       }
+    } catch (error) {
+      console.error('Failed to re-authenticate admin:', error);
+      this.adminAuthState.isAuthenticated = false;
+      this.emit('admin-auth-failed', error);
     }
 
+    // Recover session state if it existed
     if (this.sessionStateBackup) {
       try {
         console.log('Recovering session state after reconnection...');
@@ -812,5 +912,80 @@ export class WebSocketManager extends EventEmitter {
    */
   isAdminAuthenticated(): boolean {
     return this.adminAuthState.isAuthenticated;
+  }
+
+  /**
+   * Logout admin and clear tokens
+   */
+  logout(): void {
+    this.adminAuthState.isAuthenticated = false;
+    this.adminAuthState.adminId = null;
+    this.adminAuthState.username = null;
+    this.adminAuthState.cognitoAccessToken = null;
+    this.adminAuthState.cognitoIdToken = null;
+    this.adminAuthState.cognitoRefreshToken = null;
+    this.adminAuthState.tokenExpiry = null;
+    
+    // Clear stored tokens
+    this.tokenStorage.clearTokens();
+    
+    // Stop token refresh monitoring
+    if (this.tokenRefreshTimer) {
+      clearInterval(this.tokenRefreshTimer);
+      this.tokenRefreshTimer = null;
+    }
+    
+    this.emit('admin-logged-out');
+  }
+
+  /**
+   * Start automatic token refresh monitoring
+   * Checks every 5 minutes and refreshes if less than 10 minutes remaining
+   */
+  private startTokenRefreshMonitoring(): void {
+    // Clear existing timer if any
+    if (this.tokenRefreshTimer) {
+      clearInterval(this.tokenRefreshTimer);
+    }
+
+    // Check immediately
+    this.checkAndRefreshToken();
+
+    // Check every 5 minutes
+    this.tokenRefreshTimer = setInterval(() => {
+      this.checkAndRefreshToken();
+    }, 5 * 60 * 1000); // 5 minutes
+  }
+
+  /**
+   * Check token expiry and refresh if needed
+   */
+  private async checkAndRefreshToken(): Promise<void> {
+    try {
+      // Check if token will expire soon (within 10 minutes)
+      if (this.tokenStorage.willExpireSoon(10)) {
+        console.log('Access token will expire soon, refreshing...');
+        
+        // Check if we're connected
+        if (!this.isConnected) {
+          console.warn('Not connected, cannot refresh token');
+          return;
+        }
+
+        // Attempt to refresh
+        await this.refreshCognitoToken();
+        console.log('Token refreshed successfully');
+      }
+    } catch (error) {
+      console.error('Failed to refresh token:', error);
+      
+      // If refresh fails, emit session expired event
+      if (error instanceof Error && error.message.includes('expired')) {
+        this.emit('session-expired', {
+          message: 'Session expired, please login again',
+          reason: 'token_refresh_failed'
+        });
+      }
+    }
   }
 }

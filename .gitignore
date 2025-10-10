@@ -33,3 +33,6 @@ logs/
 # WebSocket Server Runtime Files
 src/websocket-server/sessions/*.json
 src/websocket-server/audio-cache/
+src/websocket-server/.jwt-secret
+src/websocket-server/data/
+src/websocket-server/admin-identities/

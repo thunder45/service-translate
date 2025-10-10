@@ -34,11 +34,18 @@ class WebSocketServerStarter {
       console.log(`   - WebSocket URL: ${networkInfo.websocketUrl}`);
       console.log(`   - HTTP URL: ${networkInfo.httpUrl}`);
       
-      // Check admin authentication setup
-      this.checkAdminSetup(serverDir);
-
-      // Check if server directory exists
+      // Check server directory
       const serverDir = path.join(process.cwd(), 'src', 'websocket-server');
+      
+      // Validate Cognito configuration (fail-fast)
+      await this.validateCognitoConfiguration(serverDir);
+
+      // Verify Cognito connectivity
+      await this.verifyCognitoConnectivity(serverDir);
+      
+      // Check directory setup
+      this.checkDirectorySetup(serverDir);
+
       const serverScript = path.join(serverDir, 'dist', 'server.js');
 
       // Build if needed
@@ -122,45 +129,182 @@ class WebSocketServerStarter {
     });
   }
 
-  private checkAdminSetup(serverDir: string): void {
+  /**
+   * Validate Cognito configuration (fail-fast)
+   * Requirements: 2.4, 3.3, 3.4
+   */
+  private async validateCognitoConfiguration(serverDir: string): Promise<void> {
+    console.log('\n🔐 Validating Cognito configuration...');
+    
     const fs = require('fs');
     const envPath = path.join(serverDir, '.env');
     
     if (!fs.existsSync(envPath)) {
-      console.log('\n⚠️  Warning: .env file not found!');
-      console.log('   Run setup script: cd src/websocket-server && ./setup-admin.sh');
-      return;
+      console.error('\n❌ ERROR: .env file not found!');
+      console.error('\n📋 Setup Instructions:');
+      console.error('   1. Deploy the backend CDK stack:');
+      console.error('      cd src/backend && npm run deploy');
+      console.error('   2. Run the unified authentication setup:');
+      console.error('      ./setup-unified-auth.sh');
+      console.error('   3. Or manually create .env with Cognito configuration');
+      console.error('\n   See: src/websocket-server/.env.example for required variables');
+      throw new Error('Missing .env file');
     }
     
     const envContent = fs.readFileSync(envPath, 'utf-8');
-    const adminPassword = envContent.match(/^ADMIN_PASSWORD=(.*)$/m)?.[1];
-    const jwtSecret = envContent.match(/^JWT_SECRET=(.*)$/m)?.[1];
     
-    if (!adminPassword || adminPassword.trim() === '') {
-      console.log('\n⚠️  Warning: Admin password not configured!');
-      console.log('   Run setup script: cd src/websocket-server && ./setup-admin.sh');
+    // Extract Cognito configuration
+    const cognitoRegion = this.extractEnvVar(envContent, 'COGNITO_REGION');
+    const cognitoUserPoolId = this.extractEnvVar(envContent, 'COGNITO_USER_POOL_ID');
+    const cognitoClientId = this.extractEnvVar(envContent, 'COGNITO_CLIENT_ID');
+    
+    // Validate required Cognito variables
+    const missingVars: string[] = [];
+    
+    if (!cognitoRegion || cognitoRegion.trim() === '') {
+      missingVars.push('COGNITO_REGION');
     }
     
-    if (!jwtSecret || jwtSecret.trim() === '') {
-      console.log('\n⚠️  Warning: JWT secret not configured!');
-      console.log('   Run setup script: cd src/websocket-server && ./setup-admin.sh');
+    if (!cognitoUserPoolId || cognitoUserPoolId.trim() === '') {
+      missingVars.push('COGNITO_USER_POOL_ID');
     }
+    
+    if (!cognitoClientId || cognitoClientId.trim() === '') {
+      missingVars.push('COGNITO_CLIENT_ID');
+    }
+    
+    if (missingVars.length > 0) {
+      console.error('\n❌ ERROR: Missing required Cognito configuration!');
+      console.error(`\n   Missing variables: ${missingVars.join(', ')}`);
+      console.error('\n📋 Setup Instructions:');
+      console.error('   1. Deploy the backend CDK stack to create Cognito User Pool:');
+      console.error('      cd src/backend && npm run deploy');
+      console.error('   2. Copy the Cognito configuration from CDK output');
+      console.error('   3. Run the unified authentication setup script:');
+      console.error('      ./setup-unified-auth.sh');
+      console.error('   4. Or manually add these variables to src/websocket-server/.env:');
+      console.error('      COGNITO_REGION=<your-region>');
+      console.error('      COGNITO_USER_POOL_ID=<your-user-pool-id>');
+      console.error('      COGNITO_CLIENT_ID=<your-client-id>');
+      console.error('\n   See: COGNITO_SETUP.md for detailed instructions');
+      throw new Error(`Missing Cognito configuration: ${missingVars.join(', ')}`);
+    }
+    
+    // Validate format of Cognito variables
+    if (cognitoUserPoolId && !cognitoUserPoolId.match(/^[a-z]+-[a-z]+-\d+_[a-zA-Z0-9]+$/)) {
+      console.error('\n❌ ERROR: Invalid COGNITO_USER_POOL_ID format!');
+      console.error(`   Expected format: <region>_<id> (e.g., us-east-1_aBcDeFgHi)`);
+      console.error(`   Got: ${cognitoUserPoolId}`);
+      console.error('\n   Verify the User Pool ID from AWS Cognito console or CDK output');
+      throw new Error('Invalid COGNITO_USER_POOL_ID format');
+    }
+    
+    console.log('   ✓ COGNITO_REGION: ' + cognitoRegion);
+    console.log('   ✓ COGNITO_USER_POOL_ID: ' + cognitoUserPoolId);
+    console.log('   ✓ COGNITO_CLIENT_ID: ' + (cognitoClientId?.substring(0, 8) || '') + '...');
+    console.log('✅ Cognito configuration validated');
+  }
+  
+  /**
+   * Verify Cognito connectivity by testing authentication
+   * Requirements: 2.4, 3.4
+   */
+  private async verifyCognitoConnectivity(serverDir: string): Promise<void> {
+    console.log('\n🔗 Verifying Cognito connectivity...');
+    
+    try {
+      const fs = require('fs');
+      const envPath = path.join(serverDir, '.env');
+      const envContent = fs.readFileSync(envPath, 'utf-8');
+      
+      const cognitoRegion = this.extractEnvVar(envContent, 'COGNITO_REGION');
+      const cognitoUserPoolId = this.extractEnvVar(envContent, 'COGNITO_USER_POOL_ID');
+      const cognitoClientId = this.extractEnvVar(envContent, 'COGNITO_CLIENT_ID');
+      
+      // Import Cognito SDK
+      const { CognitoIdentityProviderClient, DescribeUserPoolCommand } = 
+        await import('@aws-sdk/client-cognito-identity-provider');
+      
+      const client = new CognitoIdentityProviderClient({ region: cognitoRegion });
+      
+      // Test connectivity by describing the User Pool
+      await client.send(new DescribeUserPoolCommand({
+        UserPoolId: cognitoUserPoolId
+      }));
+      
+      console.log('✅ Cognito connectivity verified');
+    } catch (error: any) {
+      console.error('\n❌ ERROR: Failed to connect to Cognito!');
+      
+      if (error.name === 'ResourceNotFoundException') {
+        console.error('\n   The Cognito User Pool does not exist or is not accessible.');
+        console.error('   Verify the COGNITO_USER_POOL_ID in .env matches your deployed User Pool.');
+      } else if (error.name === 'InvalidParameterException') {
+        console.error('\n   Invalid Cognito configuration parameters.');
+        console.error('   Check that COGNITO_REGION and COGNITO_USER_POOL_ID are correct.');
+      } else if (error.code === 'ENOTFOUND' || error.code === 'ETIMEDOUT') {
+        console.error('\n   Network connectivity issue. Check your internet connection.');
+      } else {
+        console.error(`\n   Error: ${error.message}`);
+      }
+      
+      console.error('\n📋 Troubleshooting:');
+      console.error('   1. Verify the backend CDK stack is deployed:');
+      console.error('      cd src/backend && npm run deploy');
+      console.error('   2. Check AWS credentials are configured:');
+      console.error('      aws sts get-caller-identity');
+      console.error('   3. Verify Cognito User Pool exists in AWS Console');
+      console.error('   4. Ensure COGNITO_REGION matches the User Pool region');
+      console.error('\n   See: COGNITO_SETUP.md for detailed troubleshooting');
+      
+      throw new Error('Cognito connectivity check failed');
+    }
+  }
+  
+  /**
+   * Check and create necessary directories
+   */
+  private checkDirectorySetup(serverDir: string): void {
+    console.log('\n📁 Checking directory setup...');
+    
+    const fs = require('fs');
+    const envPath = path.join(serverDir, '.env');
+    const envContent = fs.readFileSync(envPath, 'utf-8');
     
     // Check if admin identities directory exists
-    const adminDir = envContent.match(/^ADMIN_IDENTITIES_DIR=(.*)$/m)?.[1] || './admin-identities';
+    const adminDir = this.extractEnvVar(envContent, 'ADMIN_IDENTITIES_DIR') || './admin-identities';
     const adminDirPath = path.join(serverDir, adminDir);
     if (!fs.existsSync(adminDirPath)) {
-      console.log(`\n📁 Creating admin identities directory: ${adminDir}`);
+      console.log(`   Creating admin identities directory: ${adminDir}`);
       fs.mkdirSync(adminDirPath, { recursive: true });
+    } else {
+      console.log(`   ✓ Admin identities directory exists: ${adminDir}`);
     }
     
     // Check if sessions directory exists
-    const sessionDir = envContent.match(/^SESSION_PERSISTENCE_DIR=(.*)$/m)?.[1] || './sessions';
+    const sessionDir = this.extractEnvVar(envContent, 'SESSION_PERSISTENCE_DIR') || './sessions';
     const sessionDirPath = path.join(serverDir, sessionDir);
     if (!fs.existsSync(sessionDirPath)) {
-      console.log(`\n📁 Creating sessions directory: ${sessionDir}`);
+      console.log(`   Creating sessions directory: ${sessionDir}`);
       fs.mkdirSync(sessionDirPath, { recursive: true });
+    } else {
+      console.log(`   ✓ Sessions directory exists: ${sessionDir}`);
     }
+    
+    console.log('✅ Directory setup complete');
+  }
+  
+  /**
+   * Extract environment variable from .env file content
+   * Handles inline comments (e.g., VAR=value # comment)
+   */
+  private extractEnvVar(envContent: string, varName: string): string | null {
+    const match = envContent.match(new RegExp(`^${varName}=(.*)$`, 'm'));
+    if (!match) return null;
+    
+    // Remove inline comments and trim
+    const value = match[1].split('#')[0].trim();
+    return value || null;
   }
 
   private setupGracefulShutdown(): void {

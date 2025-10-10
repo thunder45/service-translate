@@ -401,6 +401,7 @@ export class SessionManager {
 
   /**
    * End a session
+   * Immediately deletes the session from memory and disk
    */
   endSession(sessionId: string): boolean {
     const session = this.sessions.get(sessionId);
@@ -408,17 +409,11 @@ export class SessionManager {
       return false;
     }
 
-    session.status = 'ended';
-    session.lastActivity = new Date();
-    this.persistSession(session);
+    // Delete immediately
+    this.sessions.delete(sessionId);
+    this.deletePersistedSession(sessionId);
     
-    // Clean up after 1 hour
-    setTimeout(() => {
-      this.sessions.delete(sessionId);
-      this.deletePersistedSession(sessionId);
-    }, 60 * 60 * 1000);
-    
-    console.log(`Ended session: ${sessionId}`);
+    console.log(`Ended and deleted session: ${sessionId}`);
     return true;
   }
 

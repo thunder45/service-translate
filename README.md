@@ -109,19 +109,19 @@ src/
 │   │   ├── cost-tracker.ts # Real-time cost monitoring
 │   │   ├── holyrics-integration.ts # Holyrics API integration
 │   │   └── monitoring-dashboard.ts # Performance monitoring
-│   ├── setup.sh        # macOS setup script
+│   ├── setup-macos.sh   # macOS setup script
 │   ├── setup-windows.ps1 # Windows setup script
 │   └── package.json
 ├── websocket-server/     # TTS Server with WebSocket ✅
 │   ├── src/             # TypeScript source
 │   │   ├── server.ts    # Main server with Socket.IO
+│   │   ├── cognito-auth.ts # Cognito authentication service
 │   │   ├── polly-service.ts # AWS Polly TTS integration
 │   │   ├── session-manager.ts # Session lifecycle management
 │   │   ├── audio-manager.ts # Audio file management and serving
 │   │   ├── security-middleware.ts # Authentication and rate limiting
 │   │   └── analytics-manager.ts # Usage analytics and monitoring
 │   ├── .env.example     # Environment configuration template
-│   ├── setup-tts.sh     # TTS configuration script
 │   └── package.json
 ├── client-pwa/           # Progressive Web Application ✅
 │   ├── app.js           # Main PWA application
@@ -154,27 +154,28 @@ npm run deploy
 ./first-login.sh admin@example.com <ClientId> <NewPassword>
 ```
 
-### 3. Setup TTS Server
+### 3. Setup WebSocket Server with Cognito Authentication
 ```bash
 cd src/websocket-server
 npm install
 
-# Setup admin authentication (REQUIRED)
-./setup-admin.sh  # Interactive admin credential setup
+# Setup unified Cognito authentication (REQUIRED)
+./setup-unified-auth.sh  # Interactive Cognito configuration
 
-# Setup TTS configuration (optional)
-./setup-tts.sh  # Interactive TTS configuration
-# Or manually: cp .env.example .env && nano .env
+# Or manually configure .env:
+# COGNITO_REGION=us-east-1
+# COGNITO_USER_POOL_ID=us-east-1_xxxxxx
+# COGNITO_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-**Admin Authentication Setup:**
-The TTS server now requires admin authentication for session management. The `setup-admin.sh` script will:
-- Create admin credentials (username/password)
-- Generate JWT secret for secure token-based authentication
-- Create necessary directories for admin identity persistence
-- Configure session persistence settings
+**Unified Authentication:**
+The WebSocket server uses AWS Cognito for admin authentication, providing a single set of credentials for both AWS services and session management. The `setup-unified-auth.sh` script will:
+- Parse Cognito configuration from CDK deployment output
+- Generate `.env` file with Cognito values
+- Create necessary directories for admin identities and sessions
+- Optionally create a new Cognito user
 
-**Important:** Keep your `.env` file secure and never commit it to version control.
+**Important:** All Cognito users in the User Pool have admin access to the WebSocket server.
 
 ### 4. Setup Capture App
 ```bash
@@ -219,10 +220,12 @@ npm start
 3. **Text-Only**: Display translations without audio
 
 ### Authentication & Security
-- **Cognito User Pool**: Admin authentication with JWT tokens
+- **Unified Cognito Authentication**: Single set of credentials for AWS services and WebSocket server
+- **Cognito User Pool**: Admin authentication with Cognito tokens (access, ID, refresh)
 - **Cognito Identity Pool**: Direct AWS service access for authenticated users
 - **IAM Roles**: Least-privilege access for Transcribe and Translate services
 - **Secure Token Storage**: Encrypted using Electron's safeStorage API
+- **Token Management**: Automatic token refresh with 5-minute expiry warnings
 
 ### Local Operation
 - **No Server Required**: Application works independently

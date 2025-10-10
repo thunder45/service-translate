@@ -15,7 +15,7 @@ export class CognitoAuth {
     this.client = new CognitoIdentityProviderClient({ region: config.region });
   }
 
-  async login(username: string, password: string): Promise<string> {
+  async login(username: string, password: string): Promise<{ accessToken: string; idToken: string; refreshToken: string; expiresIn: number }> {
     try {
       const response = await this.client.send(new InitiateAuthCommand({
         AuthFlow: 'USER_PASSWORD_AUTH',
@@ -31,7 +31,12 @@ export class CognitoAuth {
         throw new Error('Password change required. Please contact administrator.');
       }
 
-      return response.AuthenticationResult!.IdToken!;
+      return {
+        accessToken: response.AuthenticationResult!.AccessToken!,
+        idToken: response.AuthenticationResult!.IdToken!,
+        refreshToken: response.AuthenticationResult!.RefreshToken!,
+        expiresIn: response.AuthenticationResult!.ExpiresIn!
+      };
     } catch (error: any) {
       if (error.name === 'NotAuthorizedException') {
         throw new Error('Invalid username or password');

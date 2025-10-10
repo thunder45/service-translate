@@ -31,9 +31,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // TTS and WebSocket
   connectWebSocket: () => ipcRenderer.invoke('connect-websocket'),
   disconnectWebSocket: () => ipcRenderer.invoke('disconnect-websocket'),
-  createSession: (sessionId) => ipcRenderer.invoke('create-session', sessionId),
+  createSession: (sessionId, config) => ipcRenderer.invoke('create-session', sessionId, config),
   endSession: () => ipcRenderer.invoke('end-session'),
   listSessions: () => ipcRenderer.invoke('list-sessions'),
+  setCurrentSession: (config) => ipcRenderer.invoke('set-current-session', config),
+  updateSessionConfig: (config) => ipcRenderer.invoke('update-session-config', config),
   updateTTSConfig: (config) => ipcRenderer.invoke('update-tts-config', config),
   getCurrentCosts: () => ipcRenderer.invoke('get-current-costs'),
   resetCostTracking: () => ipcRenderer.invoke('reset-cost-tracking'),

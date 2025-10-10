@@ -4,17 +4,17 @@ import { v4 as uuidv4 } from 'uuid';
 import lockfile from 'proper-lockfile';
 
 /**
- * AdminIdentity represents a persistent admin user identity
+ * AdminIdentity represents a persistent admin user identity with Cognito integration
  */
 export interface AdminIdentity {
-  adminId: string;           // UUID v4 persistent identifier
-  username: string;          // Display name (unique)
+  adminId: string;                // Cognito sub (UUID) - PRIMARY KEY
+  cognitoUsername: string;        // Cognito username
+  email: string;                  // Cognito email
   createdAt: Date;
   lastSeen: Date;
-  activeSockets: Set<string>; // Current socket connections (not persisted)
-  ownedSessions: Set<string>; // Sessions created by this admin
-  tokenVersion: number;       // For token invalidation
-  refreshTokens: Set<string>; // Active refresh tokens
+  activeSockets: Set<string>;     // Current socket connections (not persisted)
+  ownedSessions: Set<string>;     // Sessions created by this admin
+  cognitoGroups?: string[];       // Cognito groups (for future RBAC)
 }
 
 /**
@@ -22,20 +22,21 @@ export interface AdminIdentity {
  */
 interface SerializedAdminIdentity {
   adminId: string;
-  username: string;
+  cognitoUsername: string;
+  email: string;
   createdAt: string;
   lastSeen: string;
   ownedSessions: string[];
-  tokenVersion: number;
-  refreshTokens: string[];
+  cognitoGroups?: string[];
 }
 
 /**
- * Index mapping usernames to admin IDs
+ * Index mapping emails and usernames to admin IDs (Cognito sub)
  */
 interface AdminIndex {
   version: number;
   lastUpdated: string;
+  emailToAdminId: Record<string, string>;
   usernameToAdminId: Record<string, string>;
 }
 
@@ -61,7 +62,8 @@ export class AdminIdentityStore {
   private indexPath: string;
   private cleanupLogPath: string;
   private identities: Map<string, AdminIdentity>;
-  private usernameIndex: Map<string, string>;
+  private emailIndex: Map<string, string>;      // email -> adminId (Cognito sub)
+  private usernameIndex: Map<string, string>;   // username -> adminId (Cognito sub)
   private cleanupInterval: NodeJS.Timeout | null = null;
   private lockOptions = {
     stale: 10000,        // 10 seconds - consider lock stale after this
@@ -74,6 +76,7 @@ export class AdminIdentityStore {
     this.indexPath = path.join(this.identitiesDir, 'admin-index.json');
     this.cleanupLogPath = path.join(this.identitiesDir, 'cleanup-log.json');
     this.identities = new Map();
+    this.emailIndex = new Map();
     this.usernameIndex = new Map();
     
     this.ensureDirectoryExists();
@@ -124,28 +127,31 @@ export class AdminIdentityStore {
   }
 
   /**
-   * Load the username index from disk
+   * Load the email and username index from disk
    */
   private loadIndex(): void {
     try {
       if (fs.existsSync(this.indexPath)) {
         const data = fs.readFileSync(this.indexPath, 'utf-8');
         const index: AdminIndex = JSON.parse(data);
-        this.usernameIndex = new Map(Object.entries(index.usernameToAdminId));
+        this.emailIndex = new Map(Object.entries(index.emailToAdminId || {}));
+        this.usernameIndex = new Map(Object.entries(index.usernameToAdminId || {}));
       }
     } catch (error) {
       console.error('Failed to load admin index:', error);
+      this.emailIndex.clear();
       this.usernameIndex.clear();
     }
   }
 
   /**
-   * Save the username index to disk
+   * Save the email and username index to disk
    */
   private saveIndex(): void {
     const index: AdminIndex = {
-      version: 1,
+      version: 2, // Incremented for Cognito integration
       lastUpdated: new Date().toISOString(),
+      emailToAdminId: Object.fromEntries(this.emailIndex),
       usernameToAdminId: Object.fromEntries(this.usernameIndex)
     };
     
@@ -153,12 +159,14 @@ export class AdminIdentityStore {
   }
 
   /**
-   * Rebuild the username index from loaded identities
+   * Rebuild the email and username index from loaded identities
    */
   private rebuildIndex(): void {
+    this.emailIndex.clear();
     this.usernameIndex.clear();
     for (const [adminId, identity] of this.identities) {
-      this.usernameIndex.set(identity.username, adminId);
+      this.emailIndex.set(identity.email, adminId);
+      this.usernameIndex.set(identity.cognitoUsername, adminId);
     }
     this.saveIndex();
   }
@@ -179,17 +187,18 @@ export class AdminIdentityStore {
       
       const identity: AdminIdentity = {
         adminId: serialized.adminId,
-        username: serialized.username,
+        cognitoUsername: serialized.cognitoUsername,
+        email: serialized.email,
         createdAt: new Date(serialized.createdAt),
         lastSeen: new Date(serialized.lastSeen),
         activeSockets: new Set(),
         ownedSessions: new Set(serialized.ownedSessions),
-        tokenVersion: serialized.tokenVersion,
-        refreshTokens: new Set(serialized.refreshTokens)
+        cognitoGroups: serialized.cognitoGroups
       };
       
       this.identities.set(adminId, identity);
-      this.usernameIndex.set(identity.username, adminId);
+      this.emailIndex.set(identity.email, adminId);
+      this.usernameIndex.set(identity.cognitoUsername, adminId);
       
       return identity;
     } catch (error) {
@@ -206,12 +215,12 @@ export class AdminIdentityStore {
     
     const serialized: SerializedAdminIdentity = {
       adminId: identity.adminId,
-      username: identity.username,
+      cognitoUsername: identity.cognitoUsername,
+      email: identity.email,
       createdAt: identity.createdAt.toISOString(),
       lastSeen: identity.lastSeen.toISOString(),
       ownedSessions: Array.from(identity.ownedSessions),
-      tokenVersion: identity.tokenVersion,
-      refreshTokens: Array.from(identity.refreshTokens)
+      cognitoGroups: identity.cognitoGroups
     };
     
     this.writeFileAtomic(filePath, JSON.stringify(serialized, null, 2));
@@ -278,35 +287,72 @@ export class AdminIdentityStore {
   }
 
   /**
-   * Create a new admin identity
+   * Create a new admin identity from Cognito user info
+   * Uses Cognito sub as adminId
    */
-  public createAdminIdentity(username: string): AdminIdentity {
-    // Check if username already exists
-    if (this.usernameIndex.has(username)) {
-      throw new Error(`Admin with username '${username}' already exists`);
+  public createAdminIdentityFromCognito(userInfo: {
+    sub: string;
+    email: string;
+    username: string;
+    'cognito:groups'?: string[];
+  }): AdminIdentity {
+    // Check if admin already exists
+    if (this.identities.has(userInfo.sub)) {
+      throw new Error(`Admin with ID '${userInfo.sub}' already exists`);
     }
     
-    const adminId = uuidv4();
     const now = new Date();
     
     const identity: AdminIdentity = {
-      adminId,
-      username,
+      adminId: userInfo.sub,
+      cognitoUsername: userInfo.username,
+      email: userInfo.email,
       createdAt: now,
       lastSeen: now,
       activeSockets: new Set(),
       ownedSessions: new Set(),
-      tokenVersion: 1,
-      refreshTokens: new Set()
+      cognitoGroups: userInfo['cognito:groups']
     };
     
     // Save to memory and disk
-    this.identities.set(adminId, identity);
-    this.usernameIndex.set(username, adminId);
+    this.identities.set(identity.adminId, identity);
+    this.emailIndex.set(identity.email, identity.adminId);
+    this.usernameIndex.set(identity.cognitoUsername, identity.adminId);
     this.saveIdentity(identity);
     this.saveIndex();
     
     return identity;
+  }
+
+  /**
+   * Update Cognito user info for an existing admin identity
+   */
+  public updateCognitoUserInfo(adminId: string, userInfo: {
+    sub: string;
+    email: string;
+    username: string;
+    'cognito:groups'?: string[];
+  }): void {
+    const identity = this.identities.get(adminId);
+    if (!identity) {
+      throw new Error(`Admin identity ${adminId} not found`);
+    }
+    
+    // Remove old index entries
+    this.emailIndex.delete(identity.email);
+    this.usernameIndex.delete(identity.cognitoUsername);
+    
+    // Update identity
+    identity.cognitoUsername = userInfo.username;
+    identity.email = userInfo.email;
+    identity.cognitoGroups = userInfo['cognito:groups'];
+    
+    // Add new index entries
+    this.emailIndex.set(identity.email, identity.adminId);
+    this.usernameIndex.set(identity.cognitoUsername, identity.adminId);
+    
+    this.saveIdentity(identity);
+    this.saveIndex();
   }
 
   /**
@@ -321,6 +367,17 @@ export class AdminIdentityStore {
    */
   public getAdminByUsername(username: string): AdminIdentity | null {
     const adminId = this.usernameIndex.get(username);
+    if (!adminId) {
+      return null;
+    }
+    return this.getAdminIdentity(adminId);
+  }
+
+  /**
+   * Get an admin identity by email
+   */
+  public getAdminByEmail(email: string): AdminIdentity | null {
+    const adminId = this.emailIndex.get(email);
     if (!adminId) {
       return null;
     }
@@ -351,7 +408,8 @@ export class AdminIdentityStore {
     
     // Remove from memory
     this.identities.delete(adminId);
-    this.usernameIndex.delete(identity.username);
+    this.emailIndex.delete(identity.email);
+    this.usernameIndex.delete(identity.cognitoUsername);
     
     // Remove from disk
     const filePath = this.getIdentityFilePath(adminId);
@@ -416,45 +474,7 @@ export class AdminIdentityStore {
     this.saveIdentity(identity);
   }
 
-  /**
-   * Add a refresh token to an admin identity
-   */
-  public addRefreshToken(adminId: string, refreshToken: string): void {
-    const identity = this.identities.get(adminId);
-    if (!identity) {
-      throw new Error(`Admin identity ${adminId} not found`);
-    }
-    
-    identity.refreshTokens.add(refreshToken);
-    this.saveIdentity(identity);
-  }
 
-  /**
-   * Remove a refresh token from an admin identity
-   */
-  public removeRefreshToken(adminId: string, refreshToken: string): void {
-    const identity = this.identities.get(adminId);
-    if (!identity) {
-      return;
-    }
-    
-    identity.refreshTokens.delete(refreshToken);
-    this.saveIdentity(identity);
-  }
-
-  /**
-   * Invalidate all tokens for an admin identity
-   */
-  public invalidateAllTokens(adminId: string): void {
-    const identity = this.identities.get(adminId);
-    if (!identity) {
-      throw new Error(`Admin identity ${adminId} not found`);
-    }
-    
-    identity.tokenVersion++;
-    identity.refreshTokens.clear();
-    this.saveIdentity(identity);
-  }
 
   /**
    * Get all admin identities
@@ -478,10 +498,10 @@ export class AdminIdentityStore {
       
       // Only cleanup if no owned sessions and inactive for 90 days
       if (identity.ownedSessions.size === 0 && inactiveDuration > retentionMs) {
-        console.log(`Cleaning up inactive admin identity: ${identity.username} (${adminId})`);
+        console.log(`Cleaning up inactive admin identity: ${identity.cognitoUsername} (${adminId})`);
         cleanedAdmins.push({
           adminId: identity.adminId,
-          username: identity.username,
+          username: identity.cognitoUsername,
           lastSeen: identity.lastSeen.toISOString(),
           reason: 'Inactive for 90+ days with no owned sessions'
         });
@@ -493,32 +513,6 @@ export class AdminIdentityStore {
     // Log cleanup operation
     if (cleanedCount > 0) {
       this.logCleanup(cleanedCount, cleanedAdmins);
-    }
-    
-    return cleanedCount;
-  }
-
-  /**
-   * Clean up expired refresh tokens for all admin identities
-   */
-  public cleanupExpiredTokens(tokenExpiryMs: number = 30 * 24 * 60 * 60 * 1000): number {
-    // Note: This is a placeholder for token cleanup
-    // Actual token expiry validation would require storing token creation timestamps
-    // For now, we'll just clear tokens for inactive admins
-    let cleanedCount = 0;
-    
-    for (const [adminId, identity] of this.identities) {
-      if (identity.refreshTokens.size > 0) {
-        // Clear tokens for admins inactive for more than token expiry period
-        const inactiveDuration = Date.now() - identity.lastSeen.getTime();
-        if (inactiveDuration > tokenExpiryMs) {
-          const tokenCount = identity.refreshTokens.size;
-          identity.refreshTokens.clear();
-          this.saveIdentity(identity);
-          cleanedCount += tokenCount;
-          console.log(`Cleaned ${tokenCount} expired tokens for admin ${identity.username}`);
-        }
-      }
     }
     
     return cleanedCount;
@@ -597,9 +591,8 @@ export class AdminIdentityStore {
     console.log('Running scheduled admin identity cleanup...');
     
     const inactiveCount = this.cleanupInactiveIdentities();
-    const tokenCount = this.cleanupExpiredTokens();
     
-    console.log(`Cleanup complete: ${inactiveCount} inactive admins, ${tokenCount} expired tokens`);
+    console.log(`Cleanup complete: ${inactiveCount} inactive admins`);
   }
 
   /**

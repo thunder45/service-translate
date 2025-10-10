@@ -102,11 +102,13 @@ export class DirectStreamingManager extends EventEmitter {
     } else if (config.tts?.host && config.tts?.port) {
       const serverUrl = `ws://${config.tts.host}:${config.tts.port}`;
       console.log('Creating new WebSocketManager with URL:', serverUrl);
+      // Note: appDataPath not available here, using empty string as fallback
+      // Token storage will be disabled in this case
       this.webSocketManager = new WebSocketManager({
         serverUrl,
         reconnectAttempts: 5,
         reconnectDelay: 1000
-      });
+      }, '');
     } else {
       console.log('WebSocketManager NOT initialized - no instance provided and host/port missing');
     }

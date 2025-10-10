@@ -26,14 +26,16 @@ Examples: `CHURCH-2025-001`, `CHURCH-2025-042`
 ## Admin Authentication Messages
 
 ### Admin Authentication (Credentials Method)
-Authenticates admin user with username and password. Used for initial login.
+Authenticates admin user with Cognito username and password. Used for initial login.
+
+**Authentication Method**: AWS Cognito User Pool with USER_PASSWORD_AUTH flow
 
 **Request:**
 ```json
 {
   "type": "admin-auth",
   "method": "credentials",
-  "username": "admin",
+  "username": "admin@example.com",
   "password": "securePassword",
   "clientInfo": {
     "appVersion": "2.0.0",
@@ -49,17 +51,18 @@ Authenticates admin user with username and password. Used for initial login.
   "type": "admin-auth-response",
   "success": true,
   "adminId": "550e8400-e29b-41d4-a716-446655440000",
-  "username": "admin",
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "tokenExpiry": "2025-01-06T11:30:00.000Z",
-  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "username": "admin@example.com",
+  "accessToken": "eyJraWQiOiJxxx...cognito-access-token",
+  "idToken": "eyJraWQiOiJxxx...cognito-id-token",
+  "refreshToken": "eyJjdHkiOiJKV1QiLCJlbmMiOiJBMjU2R0NNIiwiYWxnIjoiUlNBLU9BRVAifQ...cognito-refresh-token",
+  "expiresIn": 3600,
   "ownedSessions": [
     {
       "sessionId": "CHURCH-2025-001",
       "status": "started",
       "clientCount": 3,
       "createdAt": "2025-01-06T10:00:00.000Z",
-      "createdBy": "admin",
+      "createdBy": "admin@example.com",
       "isOwner": true,
       "config": {
         "enabledLanguages": ["en", "es", "fr"],
@@ -80,6 +83,12 @@ Authenticates admin user with username and password. Used for initial login.
 }
 ```
 
+**Cognito Token Details:**
+- **accessToken**: Cognito access token (JWT) - used for API authorization (1 hour expiry)
+- **idToken**: Cognito ID token (JWT) - contains user information
+- **refreshToken**: Cognito refresh token (encrypted JWT) - used to obtain new access tokens (30 day expiry)
+- **expiresIn**: Access token expiry in seconds (typically 3600 = 1 hour)
+
 **Error Response:**
 ```json
 {
@@ -96,14 +105,16 @@ Authenticates admin user with username and password. Used for initial login.
 ```
 
 ### Admin Authentication (Token Method)
-Authenticates admin user with existing JWT token. Used for reconnection.
+Authenticates admin user with existing Cognito access token. Used for reconnection.
+
+**Authentication Method**: Cognito token validation
 
 **Request:**
 ```json
 {
   "type": "admin-auth",
   "method": "token",
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "accessToken": "eyJraWQiOiJxxx...cognito-access-token",
   "clientInfo": {
     "appVersion": "2.0.0",
     "platform": "darwin",
@@ -118,9 +129,7 @@ Authenticates admin user with existing JWT token. Used for reconnection.
   "type": "admin-auth-response",
   "success": true,
   "adminId": "550e8400-e29b-41d4-a716-446655440000",
-  "username": "admin",
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "tokenExpiry": "2025-01-06T11:30:00.000Z",
+  "username": "admin@example.com",
   "ownedSessions": [
     /* Sessions owned by this admin */
   ],
@@ -137,6 +146,8 @@ Authenticates admin user with existing JWT token. Used for reconnection.
 }
 ```
 
+**Note**: Token-based authentication does not return new tokens. The client should use stored tokens and refresh them when needed.
+
 **Followed by (if sessions were recovered):**
 ```json
 {
@@ -149,14 +160,15 @@ Authenticates admin user with existing JWT token. Used for reconnection.
 ```
 
 ### Token Refresh
-Refreshes expired JWT token using refresh token.
+Refreshes expired Cognito access token using Cognito refresh token.
+
+**Authentication Method**: Cognito refresh token flow
 
 **Request:**
 ```json
 {
   "type": "token-refresh",
-  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "adminId": "550e8400-e29b-41d4-a716-446655440000"
+  "refreshToken": "eyJjdHkiOiJKV1QiLCJlbmMiOiJBMjU2R0NNIiwiYWxnIjoiUlNBLU9BRVAifQ...cognito-refresh-token"
 }
 ```
 
@@ -165,9 +177,8 @@ Refreshes expired JWT token using refresh token.
 {
   "type": "token-refresh-response",
   "success": true,
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "tokenExpiry": "2025-01-06T12:30:00.000Z",
-  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "accessToken": "eyJraWQiOiJxxx...new-cognito-access-token",
+  "expiresIn": 3600,
   "timestamp": "2025-01-06T11:30:00.000Z"
 }
 ```
@@ -176,13 +187,16 @@ Refreshes expired JWT token using refresh token.
 ```json
 {
   "type": "admin-error",
-  "errorCode": "AUTH_1004",
+  "errorCode": "COGNITO_1007",
   "message": "Refresh token has expired",
   "userMessage": "Your session has expired. Please log in again.",
   "retryable": true,
   "timestamp": "2025-01-06T11:30:00.000Z"
 }
 ```
+
+**Automatic Token Refresh:**
+The Capture app automatically checks token expiry every 5 minutes and refreshes if less than 10 minutes remaining. This ensures seamless operation without manual intervention.
 
 ### Admin Session Access
 Request read-only or write access to a session.
@@ -555,6 +569,19 @@ All admin error messages follow this structure:
 | **AUTH_1006** | Authentication session not found | Session not found. Please log in again. | Yes | - |
 | **AUTH_1007** | Too many authentication attempts | Too many login attempts. Please wait before trying again. | Yes | 300s (5 min) |
 | **AUTH_1008** | Account has been locked due to security reasons | Account locked. Please contact administrator. | No | - |
+
+#### Cognito-Specific Errors (1050-1099)
+
+| Code | Message | User Message | Retryable | Retry After | Recovery Action |
+|------|---------|--------------|-----------|-------------|-----------------|
+| **COGNITO_1001** | Invalid Cognito credentials | Invalid username or password. Please check your credentials and try again. | Yes | - | Verify username and password are correct. Check Cognito User Pool for user status. |
+| **COGNITO_1002** | Cognito access token has expired | Your session has expired. Please refresh or log in again. | Yes | - | Client should automatically refresh token. If refresh fails, re-authenticate. |
+| **COGNITO_1003** | Cognito token is invalid or malformed | Authentication error. Please log in again. | Yes | - | Clear stored tokens and re-authenticate. Check token format and signature. |
+| **COGNITO_1004** | Cognito user not found | User not found. Please contact administrator. | No | - | User may have been deleted from Cognito. Create new user or use existing user. |
+| **COGNITO_1005** | Cognito user account is disabled | Your account is disabled. Please contact administrator. | No | - | Enable user account in Cognito User Pool console. |
+| **COGNITO_1006** | Unable to connect to Cognito service | Authentication service unavailable. Please try again later. | Yes | 30s | Check network connectivity. Verify Cognito User Pool ID and region are correct. |
+| **COGNITO_1007** | Cognito refresh token has expired | Your session has expired. Please log in again. | Yes | - | Re-authenticate with username and password. Sessions will be preserved. |
+| **COGNITO_1008** | Insufficient Cognito permissions | You do not have required permissions. | No | - | Verify user has required Cognito groups (if RBAC is enabled). |
 
 #### Authorization Errors (1100-1199)
 

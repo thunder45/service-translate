@@ -2,72 +2,113 @@
 
 ## Overview
 
-This document provides a comprehensive guide to the admin security implementation, including JWT token security, rate limiting, audit logging, and best practices.
+This document provides a comprehensive guide to the admin security implementation using AWS Cognito authentication, including Cognito token security, encrypted token storage, rate limiting, audit logging, and best practices.
+
+## Authentication Architecture
+
+The system uses AWS Cognito as the single source of truth for admin authentication, providing enterprise-grade security with centralized user management.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                  Capture Electron App                    │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │  Cognito Authentication                          │  │
+│  │  - Credential validation                         │  │
+│  │  - Token management                              │  │
+│  │  - Encrypted token storage                       │  │
+│  │  - Automatic token refresh                       │  │
+│  └──────────────────┬───────────────────────────────┘  │
+└─────────────────────┼──────────────────────────────────┘
+                      │
+                      │ Cognito Tokens (Access, ID, Refresh)
+                      │
+         ┌────────────┴────────────┐
+         │                         │
+         ▼                         ▼
+  ┌─────────────┐          ┌─────────────┐
+  │ AWS Cognito │          │ WebSocket   │
+  │ User Pool   │          │ Server      │
+  │             │          │ (validates  │
+  │             │          │  Cognito)   │
+  └─────────────┘          └─────────────┘
+```
 
 ## Components
 
-### 1. JWT Security Manager (`jwt-security.ts`)
+### 1. Cognito Authentication Service (`cognito-auth.ts`)
 
-The JWT Security Manager handles all JWT token operations with security best practices.
+The Cognito Authentication Service handles all Cognito authentication operations using the `amazon-cognito-identity-js` library.
 
 **Features:**
-- Secure token generation with cryptographic JWT IDs
-- Comprehensive token validation with multiple checks
-- Token revocation and blacklist management
-- Automatic blacklist cleanup
-- Secret rotation warnings
-- File-based persistent blacklist
+- User authentication with USER_PASSWORD_AUTH flow
+- Token validation and refresh
+- User information extraction from tokens
+- Cognito error handling and mapping
+- No AWS admin SDK required (works without AWS credentials)
 
 **Usage Example:**
 
 ```typescript
-import { JWTSecurityManager, JWTSecurityConfig } from './jwt-security';
+import { CognitoAuthService } from './cognito-auth';
 
 // Initialize
-const config: JWTSecurityConfig = {
-  secret: process.env.JWT_SECRET || JWTSecurityManager.generateSecret(),
-  algorithm: 'HS256',
-  issuer: 'service-translate-ws',
-  audience: 'service-translate-admin',
-  accessTokenExpiry: '1h',
-  refreshTokenExpiry: '30d',
-  rotationPolicy: {
-    enabled: false,
-    intervalDays: 90
-  },
-  blacklistEnabled: true,
-  blacklistCleanupIntervalMs: 3600000
-};
+const cognitoAuth = new CognitoAuthService({
+  region: process.env.COGNITO_REGION!,
+  userPoolId: process.env.COGNITO_USER_POOL_ID!,
+  clientId: process.env.COGNITO_CLIENT_ID!
+});
 
-const jwtSecurity = new JWTSecurityManager(config, './data');
-
-// Generate tokens
-const accessToken = jwtSecurity.generateAccessToken(adminId, username, tokenVersion);
-const refreshToken = jwtSecurity.generateRefreshToken(adminId, username, tokenVersion);
+// Authenticate user
+const result = await cognitoAuth.authenticateUser(username, password);
+console.log('Access token:', result.accessToken);
+console.log('User info:', result.userInfo);
 
 // Validate token
-const result = jwtSecurity.validateToken(token);
-if (result.valid) {
-  console.log('Token is valid:', result.payload);
-} else {
-  console.error('Token validation failed:', result.error, result.errorCode);
-}
+const userInfo = await cognitoAuth.validateToken(accessToken);
+console.log('Token is valid for user:', userInfo.sub);
 
-// Revoke token
-jwtSecurity.revokeToken(token, 'User requested logout');
-
-// Check if token is blacklisted
-const isRevoked = jwtSecurity.isTokenBlacklisted(jti);
-
-// Get blacklist statistics
-const stats = jwtSecurity.getBlacklistStats();
-console.log('Blacklist stats:', stats);
-
-// Cleanup
-jwtSecurity.cleanup();
+// Refresh token
+const newTokens = await cognitoAuth.refreshAccessToken(username, refreshToken);
+console.log('New access token:', newTokens.accessToken);
 ```
 
-### 2. Admin Security Middleware (`admin-security-middleware.ts`)
+### 2. Secure Token Storage (`secure-token-storage.ts`)
+
+The Secure Token Storage component provides encrypted storage for Cognito tokens on the client side using Electron's safeStorage API.
+
+**Features:**
+- Encrypted token storage using Electron safeStorage
+- Secure persistence across app restarts
+- Automatic token cleanup on logout
+- Platform-specific encryption (Keychain on macOS, DPAPI on Windows)
+
+**Usage Example:**
+
+```typescript
+import { SecureTokenStorage } from './secure-token-storage';
+
+// Initialize
+const tokenStorage = new SecureTokenStorage(app.getPath('userData'));
+
+// Store tokens
+tokenStorage.storeTokens({
+  accessToken: 'cognito-access-token',
+  idToken: 'cognito-id-token',
+  refreshToken: 'cognito-refresh-token',
+  expiresAt: new Date(Date.now() + 3600000)
+});
+
+// Load tokens
+const tokens = tokenStorage.loadTokens();
+if (tokens && tokens.expiresAt > new Date()) {
+  console.log('Valid tokens loaded');
+}
+
+// Clear tokens
+tokenStorage.clearTokens();
+```
+
+### 3. Admin Security Middleware (`admin-security-middleware.ts`)
 
 The Admin Security Middleware provides comprehensive security controls for admin operations.
 
@@ -145,33 +186,26 @@ securityMiddleware.cleanup();
 
 ### 3. Integration with AdminIdentityManager
 
-The AdminIdentityManager has been updated to use the JWT Security Manager.
-
-**Changes:**
-- Uses `JWTSecurityManager` for token generation and validation
-- Supports token revocation through JWT security layer
-- Maintains backward compatibility with existing token management
+The AdminIdentityManager integrates with Cognito Authentication Service for token validation.
 
 **Usage Example:**
 
 ```typescript
-// Generate token pair (now uses JWT Security Manager internally)
-const tokens = adminManager.generateTokenPair(adminId);
+// Authenticate with credentials (generates Cognito tokens)
+const result = await adminManager.authenticateWithCredentials(username, password, socketId);
+console.log('Admin authenticated:', result.adminId);
+console.log('Cognito tokens:', result.cognitoTokens);
 
-// Validate token (now uses JWT Security Manager internally)
+// Authenticate with existing token (token validation)
 try {
-  const payload = adminManager.validateAccessToken(token);
-  console.log('Token valid for admin:', payload.adminId);
+  const result = await adminManager.authenticateWithToken(accessToken, socketId);
+  console.log('Token valid for admin:', result.adminId);
 } catch (error) {
   console.error('Token validation failed:', error.message);
 }
 
-// Revoke token
-adminManager.revokeToken(token, 'User requested logout');
-
-// Access JWT security manager for advanced operations
-const jwtSecurity = adminManager.getJWTSecurity();
-const stats = jwtSecurity.getBlacklistStats();
+// Logout (clear admin connection)
+adminManager.removeAdminConnection(socketId);
 ```
 
 ## Configuration
@@ -181,17 +215,10 @@ const stats = jwtSecurity.getBlacklistStats();
 Add the following to your `.env` file:
 
 ```env
-# JWT Security Configuration
-JWT_SECRET=                                         # Auto-generated if not set
-JWT_ALGORITHM=HS256                                 # HS256, HS384, or HS512
-JWT_ISSUER=service-translate-ws
-JWT_AUDIENCE=service-translate-admin
-JWT_ACCESS_TOKEN_EXPIRY=1h                          # 1 hour
-JWT_REFRESH_TOKEN_EXPIRY=30d                        # 30 days
-JWT_ENABLE_BLACKLIST=true
-JWT_BLACKLIST_CLEANUP_INTERVAL_MS=3600000           # 1 hour
-JWT_SECRET_ROTATION_ENABLED=false
-JWT_SECRET_ROTATION_INTERVAL_DAYS=90
+# Cognito Configuration (REQUIRED)
+COGNITO_REGION=us-east-1                            # AWS region where User Pool is deployed
+COGNITO_USER_POOL_ID=us-east-1_xxxxxx              # Cognito User Pool ID from CDK output
+COGNITO_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxx        # Cognito Client ID from CDK output
 
 # Admin Rate Limiting Configuration
 ADMIN_AUTH_RATE_LIMIT_PER_MINUTE=5
@@ -206,63 +233,118 @@ ENABLE_SECURITY_LOGGING=true
 SECURITY_LOG_MAX_SIZE=10000
 ```
 
-### Generating JWT Secret
+### Cognito User Pool Client Configuration
 
-On first startup, if `JWT_SECRET` is not set, the system will auto-generate a secure secret. To manually generate a secret:
+The Cognito User Pool Client must be configured with specific settings for the authentication flow to work:
 
-```typescript
-import { JWTSecurityManager } from './jwt-security';
+**Required Configuration:**
+- **Client Type**: Public client (no client secret)
+- **Auth Flows**: 
+  - ALLOW_USER_PASSWORD_AUTH (enabled)
+  - ALLOW_REFRESH_TOKEN_AUTH (enabled)
+- **Token Expiry**:
+  - Access Token: 1 hour (default, configurable)
+  - ID Token: 1 hour (default, configurable)
+  - Refresh Token: 30 days (default, configurable)
+- **Read/Write Attributes**: 
+  - email (required)
+  - preferred_username (required)
 
-const secret = JWTSecurityManager.generateSecret();
-console.log('Generated JWT secret:', secret);
-```
-
-Or using Node.js:
+**Configuration via AWS CLI:**
 
 ```bash
-node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
+aws cognito-idp update-user-pool-client \
+  --user-pool-id us-east-1_xxxxxx \
+  --client-id xxxxxxxxxxxxxxxxxxxxxxxxxx \
+  --explicit-auth-flows USER_PASSWORD_AUTH ALLOW_REFRESH_TOKEN_AUTH \
+  --read-attributes email preferred_username \
+  --write-attributes email preferred_username
+```
+
+**Configuration via CDK:**
+
+```typescript
+const userPoolClient = new cognito.UserPoolClient(this, 'UserPoolClient', {
+  userPool: userPool,
+  authFlows: {
+    userPassword: true,
+    custom: false,
+    userSrp: false
+  },
+  generateSecret: false,  // Public client
+  accessTokenValidity: Duration.hours(1),
+  idTokenValidity: Duration.hours(1),
+  refreshTokenValidity: Duration.days(30),
+  readAttributes: new cognito.ClientAttributes()
+    .withStandardAttributes({ email: true, preferredUsername: true }),
+  writeAttributes: new cognito.ClientAttributes()
+    .withStandardAttributes({ email: true, preferredUsername: true })
+});
 ```
 
 ## Security Best Practices
 
-### 1. JWT Secret Management
+### 1. Cognito User Pool Security
 
-**DO:**
-- Use auto-generated secrets (64 hex characters minimum)
-- Store secrets in `.env` file with restricted permissions (chmod 600)
-- Rotate secrets every 90 days
-- Keep backup of secrets in secure location
-- Use different secrets for different environments
+**Password Policy:**
+- Minimum length: 12 characters (recommended)
+- Require uppercase, lowercase, numbers, and special characters
+- Password expiry: 90 days (optional)
+- Prevent password reuse: Last 5 passwords
 
-**DON'T:**
-- Commit secrets to version control
-- Share secrets via insecure channels
-- Use weak or predictable secrets
-- Reuse secrets across applications
+**Configuration via AWS Console:**
+1. Navigate to Cognito User Pool
+2. Go to "Policies" tab
+3. Configure password requirements
+4. Enable password expiry if needed
 
-### 2. Token Expiry Configuration
+**Configuration via CDK:**
 
-**Recommendations:**
-- Access tokens: 15 minutes to 1 hour
-- Refresh tokens: 7 to 30 days
+```typescript
+const userPool = new cognito.UserPool(this, 'UserPool', {
+  passwordPolicy: {
+    minLength: 12,
+    requireLowercase: true,
+    requireUppercase: true,
+    requireDigits: true,
+    requireSymbols: true,
+    tempPasswordValidity: Duration.days(3)
+  },
+  accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
+  mfa: cognito.Mfa.OPTIONAL,  // Enable MFA for enhanced security
+  mfaSecondFactor: {
+    sms: true,
+    otp: true
+  }
+});
+```
+
+**Multi-Factor Authentication (MFA):**
+- Enable MFA for admin accounts (highly recommended)
+- Support SMS and TOTP (Time-based One-Time Password)
+- Require MFA for sensitive operations
+- Configure MFA in Cognito User Pool settings
+
+### 2. Token Security
+
+**Token Expiry Configuration:**
+- Access tokens: 1 hour (default, recommended)
+- ID tokens: 1 hour (default, recommended)
+- Refresh tokens: 30 days (default, configurable)
 - Shorter expiry = more secure but more frequent refreshes
 - Longer expiry = better UX but higher security risk
 
-**Configuration Examples:**
+**Token Storage:**
+- **Client-Side**: Encrypted using Electron safeStorage (Keychain/DPAPI)
+- **Server-Side**: In-memory only (no persistence)
+- **Never**: Store tokens in localStorage, sessionStorage, or cookies
+- **Always**: Clear tokens on logout
 
-```env
-# High security (frequent refreshes)
-JWT_ACCESS_TOKEN_EXPIRY=15m
-JWT_REFRESH_TOKEN_EXPIRY=7d
-
-# Balanced (recommended)
-JWT_ACCESS_TOKEN_EXPIRY=1h
-JWT_REFRESH_TOKEN_EXPIRY=30d
-
-# Convenience (less secure)
-JWT_ACCESS_TOKEN_EXPIRY=4h
-JWT_REFRESH_TOKEN_EXPIRY=90d
-```
+**Token Refresh Strategy:**
+- Automatic refresh every 5 minutes
+- Refresh if less than 10 minutes remaining
+- Use Cognito refresh token for new access token
+- Handle refresh failures gracefully (re-authenticate)
 
 ### 3. Rate Limiting Configuration
 
@@ -292,23 +374,28 @@ JWT_REFRESH_TOKEN_EXPIRY=90d
 - Export: Long-term storage as needed
 - Compliance: Follow regulatory requirements
 
-### 5. Token Revocation
+### 5. Session Management
 
-**When to Revoke:**
-- User logout
-- Password change
-- Security breach detected
-- Admin account disabled
-- Suspicious activity detected
+**Session Cleanup:**
+- User logout: Clear stored tokens and disconnect
+- Password change: Re-authenticate with new credentials
+- Security breach: Clear all tokens and disconnect all admin connections
+- Admin account disabled: Handled by Cognito (user disabled in User Pool)
+- Suspicious activity: Monitor via security middleware and audit logs
 
-**Revocation Methods:**
+**Session Management Methods:**
 
 ```typescript
-// Revoke specific token
-jwtSecurity.revokeToken(token, 'User logout');
+// Logout (clear tokens and disconnect)
+tokenStorage.clearTokens();
+adminManager.removeAdminConnection(socketId);
 
-// Revoke all tokens for admin (increment version)
-adminManager.invalidateAllTokens(adminId);
+// Disconnect all admin connections (security breach)
+const sockets = adminManager.getAdminSockets(adminId);
+sockets.forEach(socketId => {
+  io.to(socketId).emit('session-expired', { reason: 'security_breach' });
+  io.sockets.sockets.get(socketId)?.disconnect(true);
+});
 ```
 
 ## Security Event Types
@@ -373,30 +460,32 @@ adminManager.invalidateAllTokens(adminId);
 
 **Symptoms:**
 - Tokens rejected as invalid
-- "Invalid signature" errors
 - "Token expired" errors
+- "Invalid token" errors from Cognito
 
 **Solutions:**
-1. Verify JWT secret is correctly configured
-2. Check token hasn't expired (decode and check `exp` claim)
-3. Ensure token version matches admin's current version
-4. Check if token has been revoked/blacklisted
-5. Verify issuer and audience claims match configuration
+1. Verify Cognito configuration (User Pool ID, Client ID, Region)
+2. Check token hasn't expired
+3. Ensure token was issued by the correct Cognito User Pool
+4. Verify network connectivity to Cognito service
+5. Check Cognito User Pool Client configuration
 
-**Debug Commands:**
+**Debug Steps:**
 
 ```typescript
-// Decode token without validation
-const payload = jwtSecurity.decodeToken(token);
-console.log('Token payload:', payload);
+// Validate token with Cognito
+try {
+  const userInfo = await cognitoAuth.validateToken(accessToken);
+  console.log('Token valid for user:', userInfo);
+} catch (error) {
+  console.error('Token validation failed:', error);
+  // Check error type for specific issues
+}
 
-// Check token expiry
-const expiry = jwtSecurity.getTokenExpiry(token);
-console.log('Token expires at:', expiry);
-
-// Check if blacklisted
-const isBlacklisted = jwtSecurity.isTokenBlacklisted(payload.jti);
-console.log('Is blacklisted:', isBlacklisted);
+// Check token storage
+const tokens = tokenStorage.loadTokens();
+console.log('Stored tokens:', tokens ? 'found' : 'not found');
+console.log('Token expiry:', tokens?.expiresAt);
 ```
 
 ### Rate Limiting Issues
@@ -474,64 +563,54 @@ console.log('Admin sessions:', sessionIds);
 
 ## Migration Guide
 
-### Updating Existing Deployments
+### Migrating from JWT to Cognito Authentication
 
-1. **Update Environment Configuration:**
+**IMPORTANT**: This system has migrated from custom JWT authentication to AWS Cognito. Existing JWT-based deployments are no longer supported.
+
+### Setting Up Cognito Authentication
+
+1. **Deploy CDK Stack:**
    ```bash
-   # Add new JWT security variables to .env
-   JWT_SECRET=  # Will be auto-generated
-   JWT_ENABLE_BLACKLIST=true
-   # ... (see Configuration section)
+   cd src/backend
+   npm run deploy
    ```
+   This creates the Cognito User Pool and outputs configuration values.
 
-2. **Create Data Directory:**
+2. **Update Environment Configuration:**
    ```bash
-   mkdir -p ./data
-   chmod 700 ./data
+   # Add Cognito configuration to .env
+   COGNITO_REGION=us-east-1
+   COGNITO_USER_POOL_ID=us-east-1_xxxxxx
+   COGNITO_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxx
    ```
 
-3. **Update Server Initialization:**
-   ```typescript
-   // Update AdminIdentityManager initialization
-   const adminManager = new AdminIdentityManager(
-     adminStore,
-     jwtConfig,
-     './data'  // Add data directory parameter
-   );
+3. **Run Setup Script:**
+   ```bash
+   ./setup-unified-auth.sh
    ```
+   This script guides you through the setup process.
 
-4. **Initialize Security Middleware:**
-   ```typescript
-   const securityMiddleware = new AdminSecurityMiddleware(
-     adminIdentityManager,
-     sessionManager,
-     rateLimitConfig
-   );
+4. **Restart Server:**
+   ```bash
+   cd src/websocket-server
+   npm start
    ```
-
-5. **Restart Server:**
-   - JWT secret will be auto-generated on first run
-   - Blacklist file will be created
-   - All existing tokens will remain valid
 
 ### Breaking Changes
 
-**None** - The implementation is backward compatible with existing token management.
+- **JWT authentication removed**: All JWT-related code has been removed
+- **Cognito required**: AWS Cognito User Pool is now mandatory
+- **Token format changed**: Cognito issues JWTs with different claims structure
+- **Setup scripts changed**: Old setup scripts (`setup-admin.sh`, `setup-tts.sh`) removed
 
 ### Optional Enhancements
 
-1. **Enable Secret Rotation Warnings:**
-   ```env
-   JWT_SECRET_ROTATION_ENABLED=true
-   JWT_SECRET_ROTATION_INTERVAL_DAYS=90
-   ```
-
-2. **Adjust Rate Limits:**
+1. **Adjust Rate Limits:**
    ```env
    ADMIN_AUTH_RATE_LIMIT_PER_MINUTE=10  # Increase if needed
    ```
 
-3. **Export Audit Logs:**
+2. **Export Audit Logs:**
    ```typescript
    // Schedule regular audit log exports
    setInterval(() => {
@@ -544,22 +623,55 @@ console.log('Admin sessions:', sessionIds);
 
 ### Unit Tests
 
-Test JWT security operations:
+Test Cognito authentication:
 
 ```typescript
-describe('JWTSecurityManager', () => {
-  it('should generate valid tokens', () => {
-    const token = jwtSecurity.generateAccessToken(adminId, username, 1);
-    const result = jwtSecurity.validateToken(token);
-    expect(result.valid).toBe(true);
+describe('CognitoAuthService', () => {
+  it('should authenticate user with credentials', async () => {
+    const result = await cognitoAuth.authenticateUser(username, password);
+    expect(result.accessToken).toBeDefined();
+    expect(result.idToken).toBeDefined();
+    expect(result.refreshToken).toBeDefined();
   });
 
-  it('should revoke tokens', () => {
-    const token = jwtSecurity.generateAccessToken(adminId, username, 1);
-    jwtSecurity.revokeToken(token);
-    const result = jwtSecurity.validateToken(token);
-    expect(result.valid).toBe(false);
-    expect(result.errorCode).toBe('TOKEN_REVOKED');
+  it('should validate access token', async () => {
+    const userInfo = await cognitoAuth.validateToken(accessToken);
+    expect(userInfo.sub).toBeDefined();
+    expect(userInfo.email).toBeDefined();
+  });
+
+  it('should refresh access token', async () => {
+    const result = await cognitoAuth.refreshAccessToken(username, refreshToken);
+    expect(result.accessToken).toBeDefined();
+    expect(result.expiresIn).toBeGreaterThan(0);
+  });
+});
+```
+
+Test token storage:
+
+```typescript
+describe('SecureTokenStorage', () => {
+  it('should store and retrieve tokens', () => {
+    const tokens = {
+      accessToken: 'test-access-token',
+      idToken: 'test-id-token',
+      refreshToken: 'test-refresh-token',
+      expiresAt: new Date(Date.now() + 3600000),
+      username: 'testuser'
+    };
+    
+    tokenStorage.storeTokens(tokens);
+    const retrieved = tokenStorage.loadTokens();
+    
+    expect(retrieved).toBeDefined();
+    expect(retrieved?.username).toBe('testuser');
+  });
+
+  it('should clear tokens', () => {
+    tokenStorage.clearTokens();
+    const tokens = tokenStorage.loadTokens();
+    expect(tokens).toBeNull();
   });
 });
 ```
@@ -586,6 +698,28 @@ describe('AdminSecurityMiddleware', () => {
       AdminOperation.END_SESSION
     );
     expect(result.valid).toBe(true);
+  });
+});
+```
+
+Test admin identity manager with Cognito:
+
+```typescript
+describe('AdminIdentityManager with Cognito', () => {
+  it('should authenticate admin with credentials', async () => {
+    const result = await adminManager.authenticateWithCredentials(
+      username,
+      password,
+      socketId
+    );
+    expect(result.adminId).toBeDefined();
+    expect(result.cognitoTokens).toBeDefined();
+  });
+
+  it('should authenticate admin with token', async () => {
+    const result = await adminManager.authenticateWithToken(accessToken, socketId);
+    expect(result.adminId).toBeDefined();
+    expect(result.ownedSessions).toBeDefined();
   });
 });
 ```
