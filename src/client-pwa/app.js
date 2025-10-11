@@ -1,3 +1,132 @@
+// Error Message Handler for new WebSocket server error format
+class ErrorMessageHandler {
+  constructor() {
+    // Error code registry with user-friendly messages as fallback
+    this.errorCodeInfo = {
+      // Session Management Errors
+      'SESSION_1201': { severity: 'error', category: 'session' },
+      'SESSION_1202': { severity: 'warning', category: 'session' },
+      'SESSION_1203': { severity: 'error', category: 'validation' },
+      'SESSION_1204': { severity: 'error', category: 'system' },
+      'SESSION_1205': { severity: 'error', category: 'system' },
+      'SESSION_1206': { severity: 'error', category: 'system' },
+      'SESSION_1207': { severity: 'warning', category: 'session' },
+      
+      // System Errors
+      'SYSTEM_1401': { severity: 'error', category: 'system' },
+      'SYSTEM_1402': { severity: 'error', category: 'system' },
+      'SYSTEM_1403': { severity: 'warning', category: 'network' },
+      'SYSTEM_1404': { severity: 'warning', category: 'rate-limit' },
+      'SYSTEM_1405': { severity: 'info', category: 'maintenance' },
+      'SYSTEM_1406': { severity: 'warning', category: 'capacity' },
+      
+      // Validation Errors
+      'VALIDATION_1501': { severity: 'error', category: 'validation' },
+      'VALIDATION_1502': { severity: 'error', category: 'validation' },
+      'VALIDATION_1503': { severity: 'error', category: 'validation' },
+      'VALIDATION_1504': { severity: 'error', category: 'validation' },
+      'VALIDATION_1505': { severity: 'error', category: 'validation' }
+    };
+  }
+
+  /**
+   * Parse error message from server
+   * Handles both new format (with errorCode) and legacy format (with code)
+   */
+  parseError(errorMessage) {
+    // New format check
+    if (errorMessage.errorCode) {
+      return {
+        isNewFormat: true,
+        errorCode: errorMessage.errorCode,
+        message: errorMessage.message || 'An error occurred',
+        userMessage: errorMessage.userMessage || errorMessage.message || 'An error occurred',
+        retryable: errorMessage.retryable !== undefined ? errorMessage.retryable : false,
+        retryAfter: errorMessage.retryAfter || null,
+        details: errorMessage.details || {},
+        timestamp: errorMessage.timestamp || new Date().toISOString(),
+        severity: this.getErrorSeverity(errorMessage.errorCode),
+        category: this.getErrorCategory(errorMessage.errorCode)
+      };
+    }
+    
+    // Legacy format (backward compatibility)
+    return {
+      isNewFormat: false,
+      errorCode: `LEGACY_${errorMessage.code || 'UNKNOWN'}`,
+      message: errorMessage.message || 'An error occurred',
+      userMessage: errorMessage.message || 'An error occurred',
+      retryable: false,
+      retryAfter: null,
+      details: errorMessage.details || {},
+      timestamp: new Date().toISOString(),
+      severity: 'error',
+      category: 'unknown'
+    };
+  }
+
+  /**
+   * Get error severity from error code
+   */
+  getErrorSeverity(errorCode) {
+    const info = this.errorCodeInfo[errorCode];
+    return info ? info.severity : 'error';
+  }
+
+  /**
+   * Get error category from error code
+   */
+  getErrorCategory(errorCode) {
+    const info = this.errorCodeInfo[errorCode];
+    return info ? info.category : 'unknown';
+  }
+
+  /**
+   * Check if error is retryable
+   */
+  isRetryable(parsedError) {
+    return parsedError.retryable === true;
+  }
+
+  /**
+   * Get retry delay in milliseconds
+   */
+  getRetryDelay(parsedError) {
+    if (parsedError.retryAfter) {
+      return parsedError.retryAfter * 1000; // Convert seconds to milliseconds
+    }
+    return 0;
+  }
+
+  /**
+   * Format error for display
+   */
+  formatForDisplay(parsedError) {
+    return {
+      message: parsedError.userMessage,
+      type: parsedError.severity,
+      canRetry: parsedError.retryable,
+      retryAfter: parsedError.retryAfter,
+      details: parsedError.details
+    };
+  }
+
+  /**
+   * Log error for debugging
+   */
+  logError(parsedError) {
+    console.error('[Error]', {
+      code: parsedError.errorCode,
+      message: parsedError.message,
+      userMessage: parsedError.userMessage,
+      retryable: parsedError.retryable,
+      category: parsedError.category,
+      timestamp: parsedError.timestamp,
+      details: parsedError.details
+    });
+  }
+}
+
 // Audio Player for cloud-generated audio (Polly)
 class AudioPlayer {
   constructor() {
@@ -368,6 +497,7 @@ class ServiceTranslateClient {
     this.settings = this.loadSettings();
     this.localTTS = new LocalTTSService();
     this.audioPlayer = new AudioPlayer();
+    this.errorHandler = new ErrorMessageHandler();
     
     // Performance optimization components
     this.performanceManager = new PerformanceManager();
@@ -1211,9 +1341,15 @@ class ServiceTranslateClient {
       this.handleConfigUpdate(data);
     });
 
+    // Error handling with new error message format
     this.socket.on('error', (error) => {
       console.error('WebSocket error:', error);
-      this.showStatus(`Error: ${error.message}`, 'error');
+      this.handleServerError(error);
+    });
+
+    this.socket.on('admin-error', (error) => {
+      console.error('WebSocket admin error:', error);
+      this.handleServerError(error);
     });
 
     // Custom session events
@@ -1225,13 +1361,189 @@ class ServiceTranslateClient {
     this.socket.on('session-not-found', (data) => {
       console.log('Session not found:', data);
       this.showLoading(false);
-      this.showStatus('Session not found. Please check the session ID.', 'error');
+      
+      // Check if it's new error format
+      if (data.errorCode) {
+        this.handleServerError(data);
+      } else {
+        this.showStatus('Session not found. Please check the session ID.', 'error');
+      }
+    });
+
+    this.socket.on('session-ended', (data) => {
+      console.log('Session ended by admin:', data);
+      this.handleSessionEnded(data);
     });
 
     this.socket.on('language-removed', (data) => {
       console.log('Language removed from session:', data);
       this.handleLanguageRemoved(data);
     });
+  }
+
+  /**
+   * Handle server error messages with new format
+   */
+  handleServerError(errorMessage) {
+    // Parse error using error handler
+    const parsedError = this.errorHandler.parseError(errorMessage);
+    
+    // Log for debugging
+    this.errorHandler.logError(parsedError);
+    
+    // Format for display
+    const displayInfo = this.errorHandler.formatForDisplay(parsedError);
+    
+    // Show error to user
+    if (displayInfo.canRetry && displayInfo.retryAfter) {
+      // Show error with countdown and retry button
+      this.showErrorWithRetry(displayInfo.message, displayInfo.type, displayInfo.retryAfter);
+    } else if (displayInfo.canRetry) {
+      // Show error with retry button (no countdown)
+      this.showErrorWithRetry(displayInfo.message, displayInfo.type);
+    } else {
+      // Show error without retry option
+      this.showStatus(displayInfo.message, displayInfo.type);
+    }
+    
+    // Handle specific error categories
+    switch (parsedError.category) {
+      case 'session':
+        this.handleSessionError(parsedError);
+        break;
+      case 'capacity':
+        this.handleCapacityError(parsedError);
+        break;
+      case 'maintenance':
+        this.handleMaintenanceError(parsedError);
+        break;
+      case 'network':
+        this.handleNetworkError(parsedError);
+        break;
+    }
+  }
+
+  /**
+   * Show error message with retry button
+   */
+  showErrorWithRetry(message, type, retryAfter = null) {
+    const statusElement = this.elements.joinStatus;
+    statusElement.className = `status-message ${type}`;
+    
+    if (retryAfter) {
+      // Show countdown
+      let remainingSeconds = retryAfter;
+      statusElement.innerHTML = `
+        ${message}
+        <div class="retry-countdown">Retry available in <span class="countdown">${remainingSeconds}</span>s</div>
+      `;
+      
+      const countdownElement = statusElement.querySelector('.countdown');
+      const countdown = setInterval(() => {
+        remainingSeconds--;
+        if (countdownElement) {
+          countdownElement.textContent = remainingSeconds;
+        }
+        
+        if (remainingSeconds <= 0) {
+          clearInterval(countdown);
+          // Add retry button
+          statusElement.innerHTML = `
+            ${message}
+            <button class="retry-btn" onclick="app.joinSession()">Retry Now</button>
+          `;
+        }
+      }, 1000);
+    } else {
+      // Show immediate retry button
+      statusElement.innerHTML = `
+        ${message}
+        <button class="retry-btn" onclick="app.joinSession()">Retry</button>
+      `;
+    }
+  }
+
+  /**
+   * Handle session-specific errors
+   */
+  handleSessionError(parsedError) {
+    if (parsedError.errorCode === 'SESSION_1201') {
+      // Session not found - may need to refresh session list
+      this.currentSession = null;
+    } else if (parsedError.errorCode === 'SESSION_1207') {
+      // Session full - suggest trying again later
+      setTimeout(() => {
+        this.showStatus('The session is currently full. Try again in a few minutes.', 'warning');
+      }, 5000);
+    }
+  }
+
+  /**
+   * Handle capacity errors
+   */
+  handleCapacityError(parsedError) {
+    // Server at capacity - show appropriate message
+    this.showStatus(parsedError.userMessage + ' Please try again later.', 'warning');
+  }
+
+  /**
+   * Handle maintenance errors
+   */
+  handleMaintenanceError(parsedError) {
+    // System in maintenance mode
+    this.showStatus(parsedError.userMessage, 'info');
+  }
+
+  /**
+   * Handle network errors
+   */
+  handleNetworkError(parsedError) {
+    // Network error - may trigger auto-reconnect
+    if (this.currentSession && this.settings.autoReconnect) {
+      this.attemptReconnectionWithBackoff();
+    }
+  }
+
+  /**
+   * Handle session ended notification
+   */
+  handleSessionEnded(data) {
+    console.log('Session ended:', data);
+    
+    // Show notification
+    const notification = document.createElement('div');
+    notification.className = 'session-ended-notification';
+    notification.innerHTML = `
+      <div class="notification-content">
+        <span class="icon">⚠️</span>
+        <div class="text">
+          <strong>Session Ended</strong>
+          <p>The admin has ended this session.</p>
+        </div>
+        <button class="ok-btn" onclick="app.leaveSession(); this.parentElement.parentElement.remove();">
+          OK
+        </button>
+      </div>
+    `;
+    
+    document.body.appendChild(notification);
+    
+    // Auto-leave after 10 seconds if user doesn't respond
+    setTimeout(() => {
+      if (notification.parentElement) {
+        this.leaveSession();
+        notification.remove();
+      }
+    }, 10000);
+  }
+
+  /**
+   * Escape HTML to prevent XSS attacks
+   */
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
   }
 
   async sendJoinSessionMessage(sessionId) {
