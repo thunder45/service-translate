@@ -358,12 +358,26 @@ export class DirectStreamingManager extends EventEmitter {
     try {
       console.log('Transcription stream timed out - doing full restart...');
       
+      // Emit event for UI notification
+      this.emit('transcription-restarting', {
+        reason: 'timeout',
+        message: 'Reconnecting transcription service...'
+      });
+      
       // Do full stop/start like manual operation
       await this.stopStreaming();
-      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Faster restart delay (100ms instead of 500ms)
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
       await this.startStreaming();
       
       console.log('Streaming restarted successfully');
+      
+      // Emit success event
+      this.emit('transcription-restarted', {
+        message: 'Transcription reconnected'
+      });
     } catch (error) {
       console.error('Failed to restart streaming:', error);
       this.emit('error', { type: 'restart', error: (error as Error).message });
