@@ -784,7 +784,7 @@ class ServiceTranslateClient {
         type: 'leave-session',
         sessionId: this.currentSession
       };
-      this.socket.emit('message', message);
+      this.socket.emit('leave-session', message);
     }
     
     // Stop all audio playback
@@ -830,7 +830,7 @@ class ServiceTranslateClient {
         newLanguage: language
       };
       
-      this.socket.emit('message', message);
+      this.socket.emit('change-language', message);
       console.log('Language change sent to server:', language);
     } else {
       console.log('Language preference saved locally:', language);
@@ -1556,7 +1556,7 @@ class ServiceTranslateClient {
     const message = {
       type: 'join-session',
       sessionId: sessionId,
-      preferredLanguage: this.settings.preferredLanguage || '',
+      preferredLanguage: this.settings.preferredLanguage || 'en', // Default to 'en' if not set
       audioCapabilities: audioCapabilities
     };
 
@@ -1581,8 +1581,8 @@ class ServiceTranslateClient {
         reject(new Error(error.message || 'Join session failed'));
       });
 
-      // Send the message
-      this.socket.emit('message', message);
+      // Send the message with type field and event name
+      this.socket.emit('join-session', message);
     });
   }
 
@@ -1675,8 +1675,12 @@ class ServiceTranslateClient {
     this.elements.leaveBtn.style.display = 'flex';
     this.updateConnectionStatus(true);
 
-    // Handle session metadata if provided
-    if (data.metadata) {
+    // Handle session metadata - check if data IS the metadata or has metadata field
+    if (data.type === 'session-metadata' || data.config || data.availableLanguages) {
+      // Data is the metadata itself
+      this.handleSessionMetadata(data);
+    } else if (data.metadata) {
+      // Data has metadata field (legacy format)
       this.handleSessionMetadata(data.metadata);
     } else {
       // Show language selection prompt if no metadata yet
