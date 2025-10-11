@@ -591,6 +591,7 @@ class ServiceTranslateClient {
       
       // Settings
       settingsPanel: document.getElementById('settings-panel'),
+      settingsCloseBtn: document.getElementById('settings-close-btn'),
       fontSizeSelect: document.getElementById('font-size'),
       fontFamilySelect: document.getElementById('font-family'),
       bgColorSelect: document.getElementById('bg-color'),
@@ -604,6 +605,10 @@ class ServiceTranslateClient {
       // Overlays
       loadingOverlay: document.getElementById('loading-overlay')
     };
+    
+    // Initialize touch tracking for swipe gestures
+    this.touchStartY = 0;
+    this.touchEndY = 0;
   }
 
   setupEventListeners() {
@@ -640,11 +645,41 @@ class ServiceTranslateClient {
       this.setVolume(parseInt(e.target.value));
     });
 
-    // Settings
+    // Settings button
     this.elements.settingsBtn.addEventListener('click', () => {
       this.toggleSettings();
     });
 
+    // Settings close button
+    this.elements.settingsCloseBtn.addEventListener('click', () => {
+      this.closeSettings();
+    });
+
+    // Click outside settings panel to close
+    document.addEventListener('click', (e) => {
+      if (this.elements.settingsPanel.classList.contains('open')) {
+        // Check if click is outside settings panel and not on settings button
+        if (!this.elements.settingsPanel.contains(e.target) && 
+            !this.elements.settingsBtn.contains(e.target)) {
+          this.closeSettings();
+        }
+      }
+    });
+
+    // Touch gestures for settings panel (swipe down to close on mobile)
+    this.elements.settingsPanel.addEventListener('touchstart', (e) => {
+      this.touchStartY = e.touches[0].clientY;
+    }, { passive: true });
+
+    this.elements.settingsPanel.addEventListener('touchmove', (e) => {
+      this.touchEndY = e.touches[0].clientY;
+    }, { passive: true });
+
+    this.elements.settingsPanel.addEventListener('touchend', () => {
+      this.handleSwipeGesture();
+    }, { passive: true });
+
+    // Setting changes
     this.elements.fontSizeSelect.addEventListener('change', (e) => {
       this.updateSetting('fontSize', e.target.value);
     });
@@ -877,6 +912,29 @@ class ServiceTranslateClient {
 
   toggleSettings() {
     this.elements.settingsPanel.classList.toggle('open');
+  }
+
+  closeSettings() {
+    this.elements.settingsPanel.classList.remove('open');
+  }
+
+  /**
+   * Handle swipe gesture on settings panel
+   * Swipe down to close on mobile devices
+   */
+  handleSwipeGesture() {
+    const swipeDistance = this.touchEndY - this.touchStartY;
+    const minSwipeDistance = 50; // Minimum pixels to trigger swipe
+    
+    // Swipe down (touch end is below touch start)
+    if (swipeDistance > minSwipeDistance) {
+      console.log('Swipe down detected, closing settings');
+      this.closeSettings();
+    }
+    
+    // Reset touch coordinates
+    this.touchStartY = 0;
+    this.touchEndY = 0;
   }
 
   updateSetting(key, value) {
