@@ -61,25 +61,25 @@ Admin Authentication → Admin Identity Manager → Admin Identity Store → Ses
 
 #### AdminIdentityManager
 
-The `AdminIdentityManager` class is the central component for admin authentication and session management.
+The `AdminIdentityManager` class is the central component for admin authentication and session management using AWS Cognito.
 
 **Core Responsibilities:**
-1. **Admin Registration**: Register new admin connections with credentials or JWT tokens
+1. **Admin Authentication**: Authenticate with Cognito credentials or tokens
 2. **Session Ownership**: Verify and track which sessions belong to which admins
-3. **Token Management**: Generate, validate, and refresh JWT access and refresh tokens
+3. **Token Management**: Handle Cognito access, ID, and refresh tokens
 4. **Session Recovery**: Restore admin's owned sessions after reconnection
 5. **Concurrent Connections**: Handle multiple simultaneous connections from the same admin
 
 **Authentication Flow:**
 
 ```typescript
-// Credential-based authentication
-const identity = adminManager.registerAdminConnection(username, socketId);
-const tokens = adminManager.generateTokenPair(identity.adminId);
+// Credential-based authentication (initial login)
+const result = await adminManager.authenticateWithCredentials(username, password, socketId);
+// Returns: { adminId, cognitoTokens, ownedSessions }
 
 // Token-based authentication (reconnection)
-const identity = adminManager.registerAdminConnectionWithToken(token, socketId);
-const sessionIds = adminManager.recoverAdminSessions(identity.adminId);
+const result = await adminManager.authenticateWithToken(accessToken, socketId);
+// Returns: { adminId, ownedSessions }
 ```
 
 **Session Ownership Verification:**
@@ -98,21 +98,14 @@ adminManager.addOwnedSession(adminId, sessionId);
 **Token Management:**
 
 ```typescript
-// Generate token pair (access + refresh)
-const tokens = adminManager.generateTokenPair(adminId);
-// Returns: { accessToken, refreshToken, accessTokenExpiry, refreshTokenExpiry }
+// Refresh Cognito tokens
+const newTokens = await adminManager.refreshTokens(username, refreshToken);
+// Returns: { accessToken, expiresIn }
 
-// Validate access token
-const payload = adminManager.validateAccessToken(token);
+// Invalidate all tokens for admin (force re-authentication)
+adminManager.invalidateAllTokens(adminId);
 
-// Refresh tokens using refresh token
-const newTokens = adminManager.refreshTokens(refreshToken);
-
-// Check token status
-const status = adminManager.checkTokenStatus(token);
-// Returns: { isValid, isExpired, needsRefresh, timeRemaining }
-
-// Schedule expiry warning (5 minutes before expiry)
+// Schedule token expiry warning (5 minutes before expiry)
 adminManager.scheduleExpiryWarning(adminId, tokenExpiry, (adminId, expiresAt, timeRemaining) => {
   // Send warning to admin
   sendTokenExpiryWarning(adminId, expiresAt, timeRemaining);
@@ -1820,122 +1813,80 @@ For issues or questions:
 
 ## Security Architecture
 
-### JWT Token Security
+### Cognito Authentication
 
-The server implements comprehensive JWT token security with the following features:
+The server uses AWS Cognito for authentication, providing enterprise-grade security with centralized user management.
 
-#### Token Generation and Validation
+#### Authentication Components
 
-**Secure Token Generation:**
-- Uses cryptographically secure random JWT IDs (jti) for revocation tracking
-- Configurable token expiry times (default: 1h for access, 30d for refresh)
-- Token versioning to support bulk invalidation
-- Signed with HS256/HS384/HS512 algorithms
+**CognitoAuthService (`cognito-auth.ts`):**
+- Validates Cognito credentials using amazon-cognito-identity-js
+- Authenticates using USER_PASSWORD_AUTH flow
+- Refreshes access tokens using Cognito refresh tokens
+- Extracts user information from Cognito tokens
+- No AWS admin SDK required
 
-**Token Validation:**
-- Signature verification using secret key
-- Issuer and audience claim validation
-- Expiry time checking
-- Token version verification
-- Blacklist checking for revoked tokens
-
-```typescript
-// Generate token pair
-const tokens = adminManager.generateTokenPair(adminId);
-// Returns: { accessToken, refreshToken, accessTokenExpiry, refreshTokenExpiry }
-
-// Validate token
-const result = jwtSecurity.validateToken(token);
-if (result.valid) {
-  // Token is valid, use result.payload
-} else {
-  // Token is invalid, check result.errorCode
-}
-```
-
-#### Token Revocation and Blacklist
-
-**Token Blacklist System:**
-- File-based persistent blacklist storage
-- Automatic cleanup of expired blacklist entries
-- Support for individual token revocation
-- Bulk revocation via token version increment
-
-**Revocation Methods:**
+**Token Management:**
+- **Access Tokens**: Short-lived (default: 1 hour) for API operations
+- **ID Tokens**: Contains user information (sub, email, username, groups)
+- **Refresh Tokens**: Long-lived (default: 30 days) for obtaining new access tokens
+- Tokens issued and validated by AWS Cognito service
+- Tokens stored in memory only (TokenStore)
 
 ```typescript
-// Revoke a specific token
-jwtSecurity.revokeToken(token, 'User requested logout');
+// Authenticate with credentials
+const result = await adminManager.authenticateWithCredentials(username, password, socketId);
+// Returns: { adminId, cognitoTokens, ownedSessions }
 
-// Revoke all tokens for an admin (increment token version)
-adminManager.invalidateAllTokens(adminId);
+// Authenticate with existing token
+const result = await adminManager.authenticateWithToken(accessToken, socketId);
+// Returns: { adminId, ownedSessions }
 
-// Check if token is blacklisted
-const isRevoked = jwtSecurity.isTokenBlacklisted(jti);
-```
-
-**Blacklist Configuration:**
-```env
-JWT_ENABLE_BLACKLIST=true
-JWT_BLACKLIST_CLEANUP_INTERVAL_MS=3600000  # 1 hour
-```
-
-#### Token Refresh and Rotation
-
-**Refresh Token Flow:**
-1. Client sends refresh token before access token expires
-2. Server validates refresh token
-3. Server verifies token is in admin's refresh token list
-4. Server generates new token pair
-5. Old refresh token is removed, new one is stored
-
-```typescript
 // Refresh tokens
-const newTokens = adminManager.refreshTokens(refreshToken);
-
-// Automatic refresh scheduling
-adminManager.scheduleAutoRefresh(
-  adminId,
-  refreshToken,
-  tokenExpiry,
-  (adminId, tokens, error) => {
-    if (tokens) {
-      // Send new tokens to client
-    }
-  }
-);
+const newTokens = await adminManager.refreshTokens(username, refreshToken);
+// Returns: { accessToken, expiresIn }
 ```
 
-#### Secret Key Management
+#### Token Validation
 
-**Secret Generation:**
-- 256-bit (64 hex characters) cryptographically secure random secret
-- Auto-generated on first server startup if not configured
-- Stored in `.env` file with restricted permissions
-
-**Secret Rotation:**
-- Optional automatic rotation warnings
-- Configurable rotation interval (default: 90 days)
-- Manual rotation process documented below
+**Cognito Token Validation:**
+- Tokens validated against Cognito User Pool
+- Signature verification by Cognito service
+- Expiry checking
+- User status verification (enabled/disabled)
 
 ```typescript
-// Generate new secret
-const newSecret = JWTSecurityManager.generateSecret();
+// Validate token with Cognito
+const userInfo = await cognitoAuth.validateToken(accessToken);
+// Returns: { sub, email, username, cognito:groups }
 ```
 
-**Secret Rotation Process:**
-1. Generate new secret key
-2. Update `JWT_SECRET` in `.env` file
-3. Restart server
-4. All existing tokens become invalid
-5. Users must re-authenticate
+#### Admin Identity Management
+
+**Persistent Identity:**
+- Admin identities use Cognito sub (UUID) as unique identifier
+- Identities persist across reconnections
+- Multiple concurrent connections supported per admin
+- Session ownership tied to Cognito sub
+
+**Token Storage:**
+- Tokens stored in memory only (TokenStore)
+- No token persistence to disk
+- Automatic cleanup on disconnect
+- Secure token handling
 
 **Configuration:**
 ```env
-JWT_SECRET=                                    # Auto-generated if not set
-JWT_SECRET_ROTATION_ENABLED=false              # Enable rotation warnings
-JWT_SECRET_ROTATION_INTERVAL_DAYS=90           # Days between rotations
+# Cognito Configuration (REQUIRED)
+COGNITO_REGION=us-east-1
+COGNITO_USER_POOL_ID=us-east-1_xxxxxx
+COGNITO_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
+
+For detailed Cognito setup and configuration, see:
+- [ADMIN_AUTHENTICATION_GUIDE.md](../../ADMIN_AUTHENTICATION_GUIDE.md) - Complete authentication guide
+- [COGNITO_SETUP.md](./COGNITO_SETUP.md) - Cognito setup instructions
+- [SECURITY_IMPLEMENTATION.md](./SECURITY_IMPLEMENTATION.md) - Security details
 
 ### Admin Operation Security
 
