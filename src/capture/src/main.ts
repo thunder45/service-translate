@@ -639,6 +639,17 @@ ipcMain.handle('start-local-streaming', async (_, options = {}) => {
     mainWindow?.webContents.send('client-disconnected', clientInfo);
   });
 
+  // Transcription restart notifications
+  streamingManager.on('transcription-restarting', (info) => {
+    console.log('Transcription restarting:', info);
+    mainWindow?.webContents.send('transcription-restarting', info);
+  });
+
+  streamingManager.on('transcription-restarted', (info) => {
+    console.log('Transcription restarted:', info);
+    mainWindow?.webContents.send('transcription-restarted', info);
+  });
+
   await streamingManager.startStreaming();
   return { success: true };
 });
