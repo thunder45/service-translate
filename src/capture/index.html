@@ -709,8 +709,14 @@
         window.adminLogin = null;
 
         // Check for stored admin tokens on page load
-        document.addEventListener('DOMContentLoaded', () => {
-            checkStoredAdminTokens();
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Wait for token check to complete before showing UI
+            const hasValidTokens = await checkStoredAdminTokens();
+            
+            // Only setup login form if no valid tokens found
+            if (hasValidTokens) {
+                return; // Skip login form setup, user is already authenticated
+            }
             
             // Setup admin login event listeners
             const adminUsername = document.getElementById('admin-username');
