@@ -100,32 +100,6 @@
             gap: 30px;
         }
         
-        .vu-meter-vertical {
-            width: 6px;
-            height: 120px;
-            background: rgba(0, 0, 0, 0.3);
-            border-radius: 3px;
-            overflow: hidden;
-            position: relative;
-            margin-right: 15px;
-        }
-        
-        .vu-fill-vertical {
-            width: 100%;
-            background: linear-gradient(to top, #4CAF50, #FFC107, #FF5722);
-            height: 0%;
-            transition: height 0.1s ease;
-            position: absolute;
-            bottom: 0;
-            border-radius: 3px;
-        }
-        
-        .translation-with-vu {
-            display: flex;
-            align-items: flex-start;
-            width: 100%;
-        }
-        
         .translation-panel {
             flex: 1;
         }
@@ -566,10 +540,6 @@
             <!-- Cost Tracking Panel - Single Line -->
             <div class="card" id="cost-panel" style="margin-bottom: 20px;">
                 <div style="display: flex; align-items: center; gap: 15px;">
-                    <div class="vu-meter-vertical" id="vu-meter" style="margin-right: 0;">
-                        <div class="vu-fill-vertical" id="vu-fill"></div>
-                    </div>
-                    
                     <div style="flex: 1; display: flex; align-items: center; justify-content: space-between;">
                         <div style="font-weight: 600; font-size: 16px;">💰 Cost Tracking</div>
                         
@@ -726,27 +696,12 @@
         let isLoggedIn = false;
         let isStreaming = false;
         let activeTab = 'pt-BR';
-        let vuBars = [];
-
-        function initializeVUMeter() {
-            // VU meter initialized (vertical bar)
-        }
-
-        function updateVUMeter(level) {
-            const vuFill = document.getElementById('vu-fill');
-            if (!vuFill) return;
-            
-            // Set height based on level (0-100) for vertical meter
-            vuFill.style.height = Math.min(100, Math.max(0, level)) + '%';
-        }
 
         // Forward declaration for admin login (defined later)
         window.adminLogin = null;
 
-        // Initialize VU meter on page load
+        // Check for stored admin tokens on page load
         document.addEventListener('DOMContentLoaded', () => {
-            initializeVUMeter();
-            // Check for stored admin tokens on startup
             checkStoredAdminTokens();
             
             // Setup admin login event listeners
@@ -1583,7 +1538,6 @@
                 isStreaming = true;
                 startBtn.style.display = 'none';
                 stopBtn.style.display = 'inline-block';
-                document.getElementById('vu-meter').classList.remove('hidden');
                 
                 showStatus('🎤 Local streaming active - Speak into your microphone', 'info');
                 
@@ -1614,7 +1568,6 @@
                 startBtn.style.display = 'inline-block';
                 startBtn.disabled = false;
                 startBtn.textContent = '🎤 Start Streaming';
-                document.getElementById('vu-meter').classList.add('hidden');
                 
                 showStatus('Streaming stopped', 'info');
                 
@@ -2031,11 +1984,6 @@
         // Handle streaming errors
         window.electronAPI.onStreamingError((error) => {
             showStatus(`Streaming error: ${error.error}`, 'error');
-        });
-
-        // Handle audio level updates
-        window.electronAPI.onAudioLevel((level) => {
-            updateVUMeter(level);
         });
 
         // Handle cost tracking events
