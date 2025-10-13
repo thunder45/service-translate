@@ -501,6 +501,14 @@ ipcMain.handle('connect-websocket', async () => {
             await webSocketManager.adminAuthenticateWithToken(storedTokens.accessToken);
             console.log('Automatic authentication successful');
             
+            // CRITICAL: Set global config and token for streaming manager
+            const config = loadConfig();
+            if (config) {
+              (global as any).config = config;
+              (global as any).authToken = storedTokens.idToken;
+              console.log('Global config and authToken set for streaming manager');
+            }
+            
             // Refresh sessions list after successful authentication
             try {
               const sessions = await webSocketManager.listSessions();
