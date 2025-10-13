@@ -17,7 +17,7 @@ interface ServerConfig {
 }
 
 function getServerConfig(config: any): ServerConfig {
-  let host = 'localhost';
+  let host = '127.0.0.1';
   let port = 3001;
   
   if (config?.tts) {
