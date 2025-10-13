@@ -631,12 +631,20 @@
                         <div id="ws-server-status" style="font-weight: bold; color: #999; font-size: 14px;">Unknown</div>
                         <div id="ws-server-url" style="font-size: 10px; color: rgba(255,255,255,0.5); margin-top: 2px;"></div>
                     </div>
-                    <div style="text-align: center; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.2);">
-                        <div style="font-size: 11px; color: rgba(255,255,255,0.7);">Clients</div>
-                        <div id="ws-client-count" style="font-weight: bold; font-size: 14px;">0</div>
-                        <div id="ws-last-activity" style="font-size: 9px; color: rgba(255,255,255,0.5); margin-top: 2px;">No activity</div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.2);">
+                        <div style="text-align: center;">
+                            <div style="font-size: 11px; color: rgba(255,255,255,0.7);">Clients</div>
+                            <div id="ws-client-count" style="font-weight: bold; font-size: 14px;">0</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="font-size: 11px; color: rgba(255,255,255,0.7);">Sessions</div>
+                            <div id="ws-session-count" style="font-weight: bold; font-size: 14px;">0</div>
+                        </div>
                     </div>
-                    <div style="margin-top: 10px;">
+                    <div style="text-align: center; margin-top: 5px; margin-bottom: 10px;">
+                        <div id="ws-last-activity" style="font-size: 9px; color: rgba(255,255,255,0.5);">No activity</div>
+                    </div>
+                    <div>
                         <button onclick="reconnectWebSocket()" style="width: 100%; font-size: 11px; padding: 6px; margin-bottom: 5px;">🔄 Reconnect</button>
                         <button onclick="stopWebSocketServer()" style="width: 100%; font-size: 11px; padding: 6px; background: #f44336;">🛑 Stop</button>
                     </div>
@@ -1037,6 +1045,15 @@
             // Update client count
             const totalClients = healthData.connections || 0;
             document.getElementById('ws-client-count').textContent = totalClients;
+            
+            // Update active sessions count
+            const activeSessions = healthData.activeSessions || 0;
+            document.getElementById('ws-session-count').textContent = activeSessions;
+            
+            // Update last activity timestamp
+            if (healthData.timestamp) {
+                updateLastActivity('Data refreshed');
+            }
             
             // Update Polly cost from metrics if available
             if (healthData.metrics && healthData.metrics.pollyCost !== undefined) {
