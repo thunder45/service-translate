@@ -227,7 +227,7 @@ const messageRouter = new MessageRouter(
   errorLogger
 );
 
-const PORT = process.env.PORT || 3001;
+const PORT = parseInt(process.env.PORT || '3001', 10);
 
 // Audio file serving endpoint
 app.get('/audio/:filename', (req, res) => {
@@ -561,9 +561,10 @@ io.on('connection', async (socket) => {
 });
 
 // Start server
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`Service Translate WebSocket Server running on port ${PORT}`);
   console.log(`Health check available at http://localhost:${PORT}/health`);
+  console.log(`Network access available at http://0.0.0.0:${PORT}/health`);
   
   // Broadcast server restart notification to all connected clients
   // This forces clients to re-authenticate since all tokens were cleared on restart
