@@ -14,9 +14,38 @@ interface VoiceMapping {
   neural: VoiceId;
 }
 
+export interface PollyCostStats {
+  characters: number;
+  standardCharacters: number;
+  neuralCharacters: number;
+  standardCost: number;
+  neuralCost: number;
+  totalCost: number;
+  requestCount: number;
+  sessionStartTime: Date;
+  lastUpdated: Date;
+}
+
+// AWS Polly Pricing (per character)
+const POLLY_PRICING = {
+  standard: 4 / 1000000, // $4 per 1M characters
+  neural: 16 / 1000000   // $16 per 1M characters
+};
+
 export class PollyService {
   private pollyClient?: PollyClient;
   private config: PollyConfig;
+  private costStats: PollyCostStats = {
+    characters: 0,
+    standardCharacters: 0,
+    neuralCharacters: 0,
+    standardCost: 0,
+    neuralCost: 0,
+    totalCost: 0,
+    requestCount: 0,
+    sessionStartTime: new Date(),
+    lastUpdated: new Date()
+  };
   
   private readonly voiceMappings: Record<string, VoiceMapping> = {
     'en': { standard: VoiceId.Joanna, neural: VoiceId.Joanna },
@@ -28,10 +57,25 @@ export class PollyService {
 
   constructor(config: PollyConfig) {
     this.config = config;
+    this.resetCostStats();
     
     if (config.enabled && config.jwtToken) {
       this.initializeClient();
     }
+  }
+
+  private resetCostStats(): void {
+    this.costStats = {
+      characters: 0,
+      standardCharacters: 0,
+      neuralCharacters: 0,
+      standardCost: 0,
+      neuralCost: 0,
+      totalCost: 0,
+      requestCount: 0,
+      sessionStartTime: new Date(),
+      lastUpdated: new Date()
+    };
   }
 
   private initializeClient(): void {
@@ -90,11 +134,41 @@ export class PollyService {
         throw new Error('No audio stream received from Polly');
       }
 
+      // Track cost for this request
+      const characterCount = text.length;
+      this.trackCost(characterCount, voiceType);
+
       return await this.streamToBuffer(response.AudioStream);
     } catch (error) {
       console.error('Polly generation failed:', error);
       return null;
     }
+  }
+
+  private trackCost(characters: number, voiceType: 'neural' | 'standard'): void {
+    const cost = characters * (voiceType === 'neural' ? POLLY_PRICING.neural : POLLY_PRICING.standard);
+    
+    this.costStats.characters += characters;
+    this.costStats.requestCount += 1;
+    this.costStats.lastUpdated = new Date();
+    
+    if (voiceType === 'neural') {
+      this.costStats.neuralCharacters += characters;
+      this.costStats.neuralCost += cost;
+    } else {
+      this.costStats.standardCharacters += characters;
+      this.costStats.standardCost += cost;
+    }
+    
+    this.costStats.totalCost = this.costStats.standardCost + this.costStats.neuralCost;
+  }
+
+  getCostStats(): PollyCostStats {
+    return { ...this.costStats };
+  }
+
+  resetCosts(): void {
+    this.resetCostStats();
   }
 
   private async streamToBuffer(stream: any): Promise<Buffer> {

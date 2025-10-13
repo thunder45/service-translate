@@ -273,6 +273,7 @@ app.get('/health', (req, res) => {
   const cacheStats = audioManager.getCacheStats();
   const healthReport = errorLogger.generateHealthReport();
   const securityStats = securityMiddleware.getSecurityStatistics();
+  const pollyCosts = pollyService.getCostStats();
   
   res.json({ 
     status: healthReport.status,
@@ -281,6 +282,17 @@ app.get('/health', (req, res) => {
     activeSessions: sessions.length,
     audioCache: cacheStats,
     ttsService: 'available',
+    pollyCosts: {
+      totalCost: pollyCosts.totalCost,
+      characters: pollyCosts.characters,
+      standardCharacters: pollyCosts.standardCharacters,
+      neuralCharacters: pollyCosts.neuralCharacters,
+      standardCost: pollyCosts.standardCost,
+      neuralCost: pollyCosts.neuralCost,
+      requestCount: pollyCosts.requestCount,
+      sessionStartTime: pollyCosts.sessionStartTime,
+      lastUpdated: pollyCosts.lastUpdated
+    },
     uptime: healthReport.uptime,
     metrics: healthReport.metrics,
     issues: healthReport.issues,
