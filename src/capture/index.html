@@ -1495,10 +1495,10 @@
             try {
                 const stored = await window.electronAPI.loadStoredAdminTokens();
                 if (stored && stored.token && stored.refreshToken) {
-                    // Stored tokens are valid (within 4-hour storage window in backend)
-                    // Try to authenticate - if access token expired, backend will use refresh token
-                    const expiry = stored.tokenExpiry ? new Date(stored.tokenExpiry) : null;
+                    console.log('Found stored tokens for:', stored.username);
                     
+                    // Set admin state
+                    const expiry = stored.tokenExpiry ? new Date(stored.tokenExpiry) : null;
                     adminAuthState = {
                         isAuthenticated: true,
                         adminId: stored.adminId,
@@ -1509,78 +1509,31 @@
                         tokenRefreshTimer: null,
                         expiryWarningTimer: null
                     };
-
-                    // Try to authenticate with stored token (will auto-refresh if expired)
-                    try {
-                        const result = await window.electronAPI.adminAuthenticateWithToken({
-                            token: stored.token
-                        });
-
-                        if (result.success) {
-                            // Set logged in flag
-                            isLoggedIn = true;
-                            
-                            // Update UI
-                            document.getElementById('login-panel').classList.add('hidden');
-                            document.getElementById('main-app').classList.remove('hidden');
-                            document.getElementById('admin-logout-btn').classList.remove('hidden');
-
-                            setupTokenManagement();
-                            showStatus(`✅ Reconnected as ${stored.username}`, 'success');
-
-                            // Load sessions
-                            if (result.ownedSessions || result.allSessions) {
-                                updateSessionsList(result.ownedSessions, result.allSessions);
-                            }
-
-                            checkAndStartWebSocketServer();
-                            return true;
-                        }
-                    } catch (authError) {
-                        console.error('Token authentication failed, trying refresh...', authError);
-                        
-                        // If token auth fails, try to refresh with refresh token
-                        if (stored.refreshToken) {
-                            try {
-                                const refreshResult = await window.electronAPI.refreshAdminToken({
-                                    refreshToken: stored.refreshToken,
-                                    adminId: stored.adminId
-                                });
-                                
-                                if (refreshResult.success) {
-                                    // Update with new tokens
-                                    adminAuthState.token = refreshResult.token;
-                                    adminAuthState.refreshToken = refreshResult.refreshToken || stored.refreshToken;
-                                    adminAuthState.tokenExpiry = refreshResult.tokenExpiry ? new Date(refreshResult.tokenExpiry) : null;
-                                    
-                                    // Store refreshed tokens
-                                    await window.electronAPI.storeAdminTokens({
-                                        username: stored.username,
-                                        token: refreshResult.token,
-                                        refreshToken: adminAuthState.refreshToken,
-                                        tokenExpiry: adminAuthState.tokenExpiry,
-                                        adminId: stored.adminId
-                                    });
-                                    
-                                    // Set logged in flag
-                                    isLoggedIn = true;
-                                    
-                                    // Update UI
-                                    document.getElementById('login-panel').classList.add('hidden');
-                                    document.getElementById('main-app').classList.remove('hidden');
-                                    document.getElementById('admin-logout-btn').classList.remove('hidden');
-
-                                    setupTokenManagement();
-                                    showStatus(`✅ Session refreshed for ${stored.username}`, 'success');
-
-                                    checkAndStartWebSocketServer();
-                                    return true;
-                                }
-                            } catch (refreshError) {
-                                console.error('Token refresh failed:', refreshError);
-                            }
-                        }
-                    }
+                    
+                    // Store for later use
+                    window.adminAuthResult = {
+                        success: true,
+                        username: stored.username,
+                        token: stored.token,
+                        refreshToken: stored.refreshToken,
+                        tokenExpiry: expiry ? expiry.getTime() : null,
+                        adminId: stored.adminId
+                    };
+                    
+                    // Set logged in flag
+                    isLoggedIn = true;
+                    
+                    // Update UI - hide login, show main app
+                    document.getElementById('login-panel').classList.add('hidden');
+                    document.getElementById('main-app').classList.remove('hidden');
+                    document.getElementById('admin-logout-btn').classList.remove('hidden');
+                    
+                    setupTokenManagement();
+                    showStatus(`✅ Reconnected as ${stored.username}`, 'success');
+                    
+                    // Start WebSocket server - authentication will happen in connect-websocket handler
+                    checkAndStartWebSocketServer();
+                    return true;
                 }
             } catch (error) {
                 console.error('Failed to check stored tokens:', error);
