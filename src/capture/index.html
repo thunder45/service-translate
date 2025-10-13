@@ -954,6 +954,8 @@
             }
         }
 
+        let healthCheckInterval = null;
+
         async function connectToWebSocketServer() {
             try {
                 const config = await window.electronAPI.loadConfig();
@@ -974,6 +976,9 @@
                     updateLastActivity('Connected to server');
                     showStatus('Connected to WebSocket server', 'success');
                     console.info('Connected to WebSocket server');
+                    
+                    // Start polling health endpoint for real-time data
+                    startHealthPolling(host, port);
                 } else {
                     updateWebSocketStatus('failed');
                     updateLastActivity('Connection failed');
@@ -986,6 +991,58 @@
                 updateWebSocketStatus('failed');
                 updateLastActivity('Connection failed');
                 showStatus(`Connection error: ${error.message}`, 'error');
+            }
+        }
+
+        function startHealthPolling(host, port) {
+            // Clear any existing interval
+            if (healthCheckInterval) {
+                clearInterval(healthCheckInterval);
+            }
+            
+            // Immediate first fetch
+            fetchHealthData(host, port);
+            
+            // Poll every 5 seconds
+            healthCheckInterval = setInterval(() => {
+                fetchHealthData(host, port);
+            }, 5000);
+        }
+
+        function stopHealthPolling() {
+            if (healthCheckInterval) {
+                clearInterval(healthCheckInterval);
+                healthCheckInterval = null;
+            }
+        }
+
+        async function fetchHealthData(host, port) {
+            try {
+                const response = await fetch(`http://${host}:${port}/health`, {
+                    method: 'GET',
+                    signal: AbortSignal.timeout(3000)
+                });
+                
+                if (response.ok) {
+                    const healthData = await response.json();
+                    updateWidgetsFromHealthData(healthData);
+                }
+            } catch (error) {
+                console.error('Health check failed:', error);
+                // Don't show error to user for polling failures
+            }
+        }
+
+        function updateWidgetsFromHealthData(healthData) {
+            // Update client count
+            const totalClients = healthData.connections || 0;
+            document.getElementById('ws-client-count').textContent = totalClients;
+            
+            // Update Polly cost from metrics if available
+            if (healthData.metrics && healthData.metrics.pollyCost !== undefined) {
+                costTracker.polly.cost = healthData.metrics.pollyCost;
+                costTracker.polly.characters = healthData.metrics.pollyCharacters || 0;
+                updateCostDisplay();
             }
         }
 
@@ -1022,6 +1079,9 @@
             updateWebSocketStatus('stopping');
             showStatus('Stopping WebSocket server...', 'info');
             updateLastActivity('Server stop requested');
+            
+            // Stop health polling
+            stopHealthPolling();
             
             try {
                 const result = await window.electronAPI.stopWebSocketServer();
@@ -1235,6 +1295,9 @@
 
         async function adminLogout() {
             try {
+                // Stop health polling
+                stopHealthPolling();
+                
                 // Clear token management timers
                 if (adminAuthState.tokenRefreshTimer) {
                     clearTimeout(adminAuthState.tokenRefreshTimer);
