@@ -1097,6 +1097,17 @@
             showStatus('Stopping WebSocket server...', 'info');
             updateLastActivity('Server stop requested');
             
+            // Stop streaming first if it's active
+            if (isStreaming) {
+                console.log('Stopping active streaming before server shutdown...');
+                try {
+                    await stopStreaming();
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                } catch (error) {
+                    console.error('Error stopping streaming:', error);
+                }
+            }
+            
             // Stop health polling
             stopHealthPolling();
             
@@ -1105,7 +1116,6 @@
                 
                 if (result.success) {
                     updateWebSocketStatus('stopped');
-                    updateSessionId('');
                     updateLastActivity('Server stopped');
                     showStatus('WebSocket server stopped', 'success');
                 } else {
@@ -2130,8 +2140,14 @@
         });
 
         // Handle WebSocket events
-        window.electronAPI.onWebSocketConnected(() => {
+        window.electronAPI.onWebSocketConnected(async () => {
             updateWebSocketStatus('connected');
+            
+            // Start health polling when connected
+            const config = await window.electronAPI.loadConfig();
+            const host = config?.tts?.host || 'localhost';
+            const port = config?.tts?.port || 3001;
+            startHealthPolling(host, port);
         });
 
         window.electronAPI.onWebSocketDisconnected(() => {
@@ -2146,6 +2162,36 @@
         window.electronAPI.onClientDisconnected((clientInfo) => {
             updateClientCount();
             updateLastActivity('Client disconnected');
+        });
+
+        // Handle server-stopping event
+        window.electronAPI.onServerStopping((data) => {
+            console.log('Server stopping event received:', data);
+            
+            // Stop health polling immediately
+            stopHealthPolling();
+            
+            // Update status
+            updateWebSocketStatus('stopped');
+            updateLastActivity('Server stopped');
+            showStatus('WebSocket server stopped. Session preserved.', 'info');
+            
+            // Gray out buttons but keep session info visible
+            const refreshBtn = document.getElementById('refresh-sessions-btn');
+            const createBtn = document.getElementById('create-session-btn');
+            const startBtn = document.getElementById('start-btn');
+            const endSessionBtn = document.getElementById('end-session-btn');
+            
+            if (refreshBtn) refreshBtn.disabled = true;
+            if (createBtn) createBtn.disabled = true;
+            if (startBtn) startBtn.disabled = true;
+            if (endSessionBtn) endSessionBtn.disabled = true;
+            
+            // Keep session ID visible but show it's disconnected
+            const currentSessionId = document.getElementById('current-session-id');
+            if (currentSessionId && currentSessionId.textContent !== 'Not Connected') {
+                currentSessionId.style.opacity = '0.5';
+            }
         });
 
         // Holyrics control functions

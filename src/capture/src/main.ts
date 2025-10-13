@@ -279,19 +279,35 @@ ipcMain.handle('admin-authenticate', async (_, credentials: { username: string; 
       });
     }
 
-    // Authenticate directly with Cognito
+    // Authenticate with Cognito
     const tokens = await cognitoAuth.login(credentials.username, credentials.password);
     
     // Store config and token globally for streaming manager
     (global as any).config = config;
     (global as any).authToken = tokens.idToken; // Identity Pool needs ID token
     
+    // Store tokens in SecureTokenStorage for WebSocket reconnection
+    // This must happen even if WebSocket is not connected yet
+    const { SecureTokenStorage } = require('./secure-token-storage');
+    const tokenStorage = new SecureTokenStorage(app.getPath('userData'));
+    
+    const expiresAt = new Date(Date.now() + tokens.expiresIn * 1000);
+    tokenStorage.storeTokens({
+      accessToken: tokens.accessToken,
+      idToken: tokens.idToken,
+      refreshToken: tokens.refreshToken,
+      expiresAt,
+      username: credentials.username
+    });
+    
+    console.log('Tokens stored in SecureTokenStorage for future reconnection');
+    
     return {
       success: true,
       username: credentials.username,
       token: tokens.accessToken,
       refreshToken: tokens.refreshToken,
-      tokenExpiry: Date.now() + (tokens.expiresIn * 1000),
+      tokenExpiry: expiresAt.getTime(),
       adminId: credentials.username
     };
   } catch (error: any) {
@@ -432,12 +448,82 @@ ipcMain.handle('connect-websocket', async () => {
       webSocketManager.on('error', (error) => {
         console.log('WebSocketManager: error event:', error);
       });
+      
+      // Listen for session expired events
+      webSocketManager.on('session-expired', (notification) => {
+        console.log('Session expired notification:', notification);
+        mainWindow?.webContents.send('session-expired', notification);
+      });
+      
+      // Listen for admin auth failed events
+      webSocketManager.on('admin-auth-failed', (error) => {
+        console.log('Admin auth failed:', error);
+        mainWindow?.webContents.send('admin-auth-failed', error);
+      });
     } else {
       console.log('WebSocketManager already exists, reusing');
     }
     
     await webSocketManager.connect();
     console.log('WebSocket connected successfully');
+    
+    // After successful connection, try to authenticate with stored tokens if available
+    try {
+      const { SecureTokenStorage } = require('./secure-token-storage');
+      const tokenStorage = new SecureTokenStorage(app.getPath('userData'));
+      
+      if (tokenStorage.hasStoredTokens()) {
+        console.log('Found stored tokens, attempting automatic authentication...');
+        const storedTokens = tokenStorage.loadTokens();
+        
+        if (storedTokens) {
+          // Check if access token is expired
+          if (storedTokens.expiresAt < new Date()) {
+            console.log('Stored access token expired, will attempt refresh on first use');
+          }
+          
+          // Authenticate with stored token
+          try {
+            await webSocketManager.adminAuthenticateWithToken(storedTokens.accessToken);
+            console.log('Automatic authentication successful');
+            
+            // Refresh sessions list after successful authentication
+            try {
+              const sessions = await webSocketManager.listSessions();
+              console.log('Sessions list refreshed after auto-authentication');
+              
+              mainWindow?.webContents.send('admin-auto-authenticated', {
+                username: storedTokens.username,
+                adminId: storedTokens.username,
+                sessions: sessions  // Include refreshed session list
+              });
+            } catch (sessionError: any) {
+              console.log('Failed to refresh sessions after auth:', sessionError.message);
+              // Still send authentication success even if session list fails
+              mainWindow?.webContents.send('admin-auto-authenticated', {
+                username: storedTokens.username,
+                adminId: storedTokens.username
+              });
+            }
+          } catch (authError: any) {
+            console.log('Automatic authentication failed:', authError.message);
+            // Don't throw - user can still manually login
+            // Just notify the UI
+            mainWindow?.webContents.send('admin-auth-required', {
+              reason: authError.message
+            });
+          }
+        }
+      } else {
+        console.log('No stored tokens found - user needs to login');
+        mainWindow?.webContents.send('admin-auth-required', {
+          reason: 'No stored credentials'
+        });
+      }
+    } catch (error: any) {
+      console.error('Error checking stored tokens:', error);
+      // Don't fail the connection if token check fails
+    }
     
     return { success: true };
   } catch (error: any) {
@@ -720,6 +806,34 @@ ipcMain.handle('stop-websocket-server', async () => {
     const { port } = getServerConfig(config);
     
     console.log(`Stopping WebSocket server on port ${port}...`);
+    
+    // FIRST: Stop streaming if active
+    if (streamingManager) {
+      console.log('Stopping active streaming...');
+      try {
+        await streamingManager.stopStreaming();
+        streamingManager = null;
+        console.log('Streaming stopped');
+      } catch (error) {
+        console.error('Error stopping streaming:', error);
+      }
+    }
+    
+    // SECOND: Disconnect the WebSocket client to prevent reconnection attempts
+    // NOTE: We do NOT end the session - it will resume when server restarts
+    if (webSocketManager && webSocketManager.isConnectedToServer()) {
+      console.log('Disconnecting WebSocket client before stopping server...');
+      webSocketManager.disconnect();
+      // Give it a moment to clean up
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    
+    // THIRD: Notify UI to gray out buttons but keep session info
+    mainWindow?.webContents.send('server-stopping', {
+      streamingStopped: true,
+      sessionPreserved: true,
+      disconnected: true
+    });
     
     return new Promise((resolve) => {
       // Kill only LISTEN processes on the specified port

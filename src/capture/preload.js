@@ -56,4 +56,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onWebSocketDisconnected: (callback) => ipcRenderer.on('websocket-disconnected', () => callback()),
   onClientConnected: (callback) => ipcRenderer.on('client-connected', (_, data) => callback(data)),
   onClientDisconnected: (callback) => ipcRenderer.on('client-disconnected', (_, data) => callback(data)),
+  onServerStopping: (callback) => ipcRenderer.on('server-stopping', (_, data) => callback(data)),
 });

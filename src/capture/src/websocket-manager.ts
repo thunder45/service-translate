@@ -679,6 +679,11 @@ export class WebSocketManager extends EventEmitter {
     this.disconnect();
     this.reconnectAttempts = 0;
     await this.connect();
+    
+    // Restore session state and authentication after reconnection
+    await this.recoverSessionState();
+    
+    this.emit('reconnected');
   }
 
   /**
