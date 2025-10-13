@@ -342,8 +342,22 @@ ipcMain.handle('store-admin-tokens', async (_, data: AdminTokenData) => {
 
 ipcMain.handle('load-stored-admin-tokens', async () => {
   try {
-    const tokens = loadStoredAdminTokens();
-    return tokens;
+    const { SecureTokenStorage } = require('./secure-token-storage');
+    const tokenStorage = new SecureTokenStorage(app.getPath('userData'));
+    
+    if (tokenStorage.hasStoredTokens()) {
+      const tokens = tokenStorage.loadTokens();
+      if (tokens) {
+        return {
+          token: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+          tokenExpiry: tokens.expiresAt.toISOString(),
+          adminId: tokens.username,
+          username: tokens.username
+        };
+      }
+    }
+    return null;
   } catch (error: any) {
     console.error('Failed to load stored admin tokens:', error);
     return null;
