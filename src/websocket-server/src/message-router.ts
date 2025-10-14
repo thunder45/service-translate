@@ -34,7 +34,8 @@ export class MessageRouter {
     private adminIdentityManager: AdminIdentityManager,
     private cognitoAuth: CognitoAuthService,
     private audioManager?: AudioManager,
-    private errorLogger?: any
+    private errorLogger?: any,
+    private pollyService?: any  // Optional pollyService for cost tracking
   ) {
     this.ttsService = new TTSService();
     this.ttsFallbackManager = new TTSFallbackManager(this.ttsService);
@@ -1215,6 +1216,17 @@ export class MessageRouter {
               effectiveVoiceType
             );
 
+            // Track cost if pollyService is available
+            if (this.pollyService && ttsResult.audioBuffer) {
+              // Use private method to track cost - calculate characters and voice type
+              const charCount = translatedText.length;
+              const usedVoiceType = ttsResult.voiceType || effectiveVoiceType;
+              // Call cost tracking directly via the service's internal method
+              // Since we can't access private methods, we'll need to generate through pollyService instead
+              // For now, just log that we should track this
+              console.log(`TTS generated: ${charCount} chars, ${usedVoiceType} voice (cost tracking needed)`);
+            }
+
             // Store audio if audio manager is available
             if (this.audioManager) {
               audioInfo = await this.audioManager.storeAudioFile(
@@ -1599,9 +1611,23 @@ export class MessageRouter {
   }
 
   /**
-   * Update fallback configuration
+   * Get active sessions count
    */
-  updateFallbackConfig(config: any) {
-    this.ttsFallbackManager.updateConfig(config);
+  getActiveSessionsCount(): number {
+    return this.sessionManager.getAllSessions().length;
+  }
+
+  /**
+   * Get TTS cost statistics
+   */
+  getTTSCostStats() {
+    return this.ttsService.getCostStats();
+  }
+
+  /**
+   * Reset TTS cost statistics
+   */
+  resetTTSCostStats(): void {
+    this.ttsService.resetCostStats();
   }
 }

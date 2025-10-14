@@ -224,7 +224,8 @@ const messageRouter = new MessageRouter(
   adminIdentityManager,
   cognitoAuth,
   audioManager,
-  errorLogger
+  errorLogger,
+  pollyService
 );
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
@@ -273,7 +274,7 @@ app.get('/health', (req, res) => {
   const cacheStats = audioManager.getCacheStats();
   const healthReport = errorLogger.generateHealthReport();
   const securityStats = securityMiddleware.getSecurityStatistics();
-  const pollyCosts = pollyService.getCostStats();
+  const ttsCosts = messageRouter.getTTSCostStats();
   
   res.json({ 
     status: healthReport.status,
@@ -282,16 +283,16 @@ app.get('/health', (req, res) => {
     activeSessions: sessions.length,
     audioCache: cacheStats,
     ttsService: 'available',
-    pollyCosts: {
-      totalCost: pollyCosts.totalCost,
-      characters: pollyCosts.characters,
-      standardCharacters: pollyCosts.standardCharacters,
-      neuralCharacters: pollyCosts.neuralCharacters,
-      standardCost: pollyCosts.standardCost,
-      neuralCost: pollyCosts.neuralCost,
-      requestCount: pollyCosts.requestCount,
-      sessionStartTime: pollyCosts.sessionStartTime,
-      lastUpdated: pollyCosts.lastUpdated
+    ttsCosts: {
+      totalCost: ttsCosts.totalCost,
+      characters: ttsCosts.characters,
+      standardCharacters: ttsCosts.standardCharacters,
+      neuralCharacters: ttsCosts.neuralCharacters,
+      standardCost: ttsCosts.standardCost,
+      neuralCost: ttsCosts.neuralCost,
+      requestCount: ttsCosts.requestCount,
+      sessionStartTime: ttsCosts.sessionStartTime,
+      lastUpdated: ttsCosts.lastUpdated
     },
     uptime: healthReport.uptime,
     metrics: healthReport.metrics,

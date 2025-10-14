@@ -24,6 +24,18 @@ export interface TTSResult {
   duration?: number;
 }
 
+export interface TTSCostStats {
+  characters: number;
+  standardCharacters: number;
+  neuralCharacters: number;
+  standardCost: number;
+  neuralCost: number;
+  totalCost: number;
+  requestCount: number;
+  sessionStartTime: Date;
+  lastUpdated: Date;
+}
+
 export class TTSService {
   private pollyClient: PollyClient;
   private config: TTSConfig;
@@ -31,6 +43,13 @@ export class TTSService {
   private availableVoices: Voice[] = [];
   private cacheManager: AudioCacheManager;
   private audioOptimizer: AudioOptimizer;
+  private costStats: TTSCostStats;
+  
+  // Polly pricing per million characters
+  private static readonly POLLY_PRICING = {
+    standard: 4 / 1000000,
+    neural: 16 / 1000000
+  };
 
   constructor(config: TTSConfig = {
     region: 'us-east-1',
@@ -40,6 +59,19 @@ export class TTSService {
   }) {
     this.config = config;
     this.pollyClient = new PollyClient({ region: config.region });
+    
+    // Initialize cost tracking
+    this.costStats = {
+      characters: 0,
+      standardCharacters: 0,
+      neuralCharacters: 0,
+      standardCost: 0,
+      neuralCost: 0,
+      totalCost: 0,
+      requestCount: 0,
+      sessionStartTime: new Date(),
+      lastUpdated: new Date()
+    };
     
     // Initialize cache and optimizer
     this.cacheManager = new AudioCacheManager({
@@ -251,6 +283,9 @@ export class TTSService {
 
       console.log(`TTS synthesis completed: ${audioBuffer.length} bytes, ~${duration}s, latency: ${latency}ms`);
 
+      // Track cost
+      this.trackCost(text.length, actualVoiceType);
+
       return {
         audioBuffer,
         format: this.config.outputFormat,
@@ -347,7 +382,57 @@ export class TTSService {
   }
 
   /**
-   * Get TTS cost estimation
+   * Track cost for a TTS request
+   */
+  private trackCost(characters: number, voiceType: 'neural' | 'standard'): void {
+    const cost = characters * (voiceType === 'neural' 
+      ? TTSService.POLLY_PRICING.neural 
+      : TTSService.POLLY_PRICING.standard);
+    
+    this.costStats.characters += characters;
+    this.costStats.requestCount += 1;
+    this.costStats.lastUpdated = new Date();
+    
+    if (voiceType === 'neural') {
+      this.costStats.neuralCharacters += characters;
+      this.costStats.neuralCost += cost;
+    } else {
+      this.costStats.standardCharacters += characters;
+      this.costStats.standardCost += cost;
+    }
+    
+    this.costStats.totalCost = this.costStats.standardCost + this.costStats.neuralCost;
+    
+    console.log(`TTS cost tracked: ${characters} chars, ${voiceType}, $${cost.toFixed(6)} (total: $${this.costStats.totalCost.toFixed(6)})`);
+  }
+
+  /**
+   * Get TTS cost statistics
+   */
+  getCostStats(): TTSCostStats {
+    return { ...this.costStats };
+  }
+
+  /**
+   * Reset cost statistics
+   */
+  resetCostStats(): void {
+    this.costStats = {
+      characters: 0,
+      standardCharacters: 0,
+      neuralCharacters: 0,
+      standardCost: 0,
+      neuralCost: 0,
+      totalCost: 0,
+      requestCount: 0,
+      sessionStartTime: new Date(),
+      lastUpdated: new Date()
+    };
+    console.log('TTS cost statistics reset');
+  }
+
+  /**
+   * Get TTS cost estimation (kept for backward compatibility)
    */
   calculateCost(characterCount: number, voiceType: 'neural' | 'standard'): number {
     // AWS Polly pricing (as of 2024)

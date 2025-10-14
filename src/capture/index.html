@@ -1058,10 +1058,10 @@
                 updateLastActivity('Data refreshed');
             }
             
-            // Update Polly cost from metrics if available
-            if (healthData.metrics && healthData.metrics.pollyCost !== undefined) {
-                costTracker.polly.cost = healthData.metrics.pollyCost;
-                costTracker.polly.characters = healthData.metrics.pollyCharacters || 0;
+            // Update Polly cost from health endpoint
+            if (healthData.ttsCosts) {
+                costTracker.polly.cost = healthData.ttsCosts.totalCost || 0;
+                costTracker.polly.characters = healthData.ttsCosts.characters || 0;
                 updateCostDisplay();
             }
         }
