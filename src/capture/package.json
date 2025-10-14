@@ -6,7 +6,7 @@
   "scripts": {
     "start": "electron .",
     "build": "tsc",
-    "dev": "NODE_ENV=development tsc && electron ."
+    "dev": "cross-env NODE_ENV=development tsc && electron ."
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.0.0",
@@ -19,6 +19,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "cross-env": "^10.1.0",
     "electron": "^28.0.0",
     "typescript": "^5.0.0"
   },
