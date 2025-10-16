@@ -57,33 +57,26 @@ export class AudioCapture extends EventEmitter {
       }
     } else {
       // macOS: Use CoreAudio driver
-      if (this.config.device && this.config.device !== 'default') {
-        soxArgs = [
-          '-t', 'coreaudio',
-          this.config.device,
-          '-t', 'raw',
-          '-r', this.config.sampleRate.toString(),
-          '-e', 'signed-integer',
-          '-b', '16',
-          '-c', this.config.channels.toString(),
-          '-'
-        ];
-      } else {
-        soxArgs = [
-          '-d',
-          '-t', 'raw',
-          '-r', this.config.sampleRate.toString(),
-          '-e', 'signed-integer',
-          '-b', '16',
-          '-c', this.config.channels.toString(),
-          '-'
-        ];
-      }
+      // Always use default device (-d) as device enumeration IDs don't match SoX device numbers
+      soxArgs = [
+        '-d',
+        '-t', 'raw',
+        '-r', this.config.sampleRate.toString(),
+        '-e', 'signed-integer',
+        '-b', '16',
+        '-c', this.config.channels.toString(),
+        '-'
+      ];
     }
     
+    console.log('[AudioCapture] Starting SoX with args:', soxArgs);
     this.process = spawn('sox', soxArgs);
 
+    // Log when SoX process starts
+    console.log('[AudioCapture] SoX process spawned, PID:', this.process.pid);
+
     this.process.stdout.on('data', (chunk: Buffer) => {
+      console.log(`[AudioCapture] Captured ${chunk.length} bytes from microphone`);
       this.buffer.push(chunk);
       
       // Calculate audio level (RMS)
@@ -106,9 +99,26 @@ export class AudioCapture extends EventEmitter {
       }
     });
 
+    // Log stderr output from SoX (warnings, errors only - skip progress updates)
+    this.process.stderr.on('data', (data: Buffer) => {
+      const message = data.toString().trim();
+      // Skip progress updates (In:X.XX% ...) but log errors, warnings, and initial info
+      if (!message.match(/^In:\d+\.\d+%/)) {
+        console.log('[AudioCapture] SoX stderr:', message);
+      }
+    });
+
     this.process.on('error', (err: Error) => {
-      console.error('Audio capture error:', err);
+      console.error('[AudioCapture] Process error:', err);
       this.emit('error', err);
+    });
+
+    this.process.on('close', (code: number, signal: string) => {
+      console.log('[AudioCapture] SoX process closed, code:', code, 'signal:', signal);
+    });
+
+    this.process.on('exit', (code: number, signal: string) => {
+      console.log('[AudioCapture] SoX process exited, code:', code, 'signal:', signal);
     });
   }
 

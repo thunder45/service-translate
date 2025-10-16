@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, safeStorage } from 'electron';
+import { app, BrowserWindow, ipcMain, safeStorage, systemPreferences } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { CognitoAuth } from './auth';
@@ -250,6 +250,29 @@ ipcMain.handle('get-audio-devices', async () => {
   } catch (error) {
     console.error('Audio device enumeration failed:', error);
     return [{ id: 'default', name: 'Default System Input' }];
+  }
+});
+
+ipcMain.handle('request-microphone-permission', async () => {
+  try {
+    if (process.platform === 'darwin') {
+      const status = systemPreferences.getMediaAccessStatus('microphone');
+      console.log('Current microphone permission status:', status);
+      
+      if (status === 'not-determined') {
+        // This will trigger the permission dialog
+        const granted = await systemPreferences.askForMediaAccess('microphone');
+        return { success: true, granted, status: granted ? 'granted' : 'denied' };
+      }
+      
+      return { success: true, granted: status === 'granted', status };
+    }
+    
+    // Windows doesn't have the same permission system
+    return { success: true, granted: true, status: 'granted' };
+  } catch (error: any) {
+    console.error('Failed to request microphone permission:', error);
+    return { success: false, error: error.message };
   }
 });
 
@@ -677,6 +700,20 @@ ipcMain.handle('reset-cost-tracking', async () => {
 
 // Local streaming (enhanced with TTS and WebSocket)
 ipcMain.handle('start-local-streaming', async (_, options = {}) => {
+  // Request microphone permission before starting
+  if (process.platform === 'darwin') {
+    const status = systemPreferences.getMediaAccessStatus('microphone');
+    console.log('Microphone permission status:', status);
+    
+    if (status !== 'granted') {
+      console.log('Requesting microphone permission...');
+      const granted = await systemPreferences.askForMediaAccess('microphone');
+      if (!granted) {
+        throw new Error('Microphone permission denied. Please grant microphone access in System Settings > Privacy & Security > Microphone and try again.');
+      }
+    }
+  }
+  
   const config = (global as any).config;
   const token = (global as any).authToken;
   

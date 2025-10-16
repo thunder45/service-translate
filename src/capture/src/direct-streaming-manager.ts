@@ -211,6 +211,7 @@ export class DirectStreamingManager extends EventEmitter {
     // Handle audio data
     this.audioCapture.on('data', (audioData) => {
       if (this.isActive) {
+        console.log(`[StreamingManager] Sending ${audioData.length} bytes to AWS Transcribe`);
         this.transcribeClient.sendAudio(audioData);
       }
     });
