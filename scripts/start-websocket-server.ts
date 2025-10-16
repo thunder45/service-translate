@@ -225,6 +225,11 @@ class WebSocketServerStarter {
       const { CognitoIdentityProviderClient, DescribeUserPoolCommand } = 
         await import('@aws-sdk/client-cognito-identity-provider');
       
+      // Type guard to ensure values are not null
+      if (!cognitoRegion || !cognitoUserPoolId) {
+        throw new Error('Invalid Cognito configuration');
+      }
+      
       const client = new CognitoIdentityProviderClient({ region: cognitoRegion });
       
       // Test connectivity by describing the User Pool
