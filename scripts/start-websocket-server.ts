@@ -96,12 +96,34 @@ class WebSocketServerStarter {
   private async startServer(serverDir: string, serverScript: string): Promise<void> {
     console.log('🚀 Starting server process...');
 
+    // Read .env file and extract Cognito configuration to pass to server
+    const fs = require('fs');
+    const envPath = path.join(serverDir, '.env');
+    const envContent = fs.readFileSync(envPath, 'utf-8');
+    
+    // Parse all environment variables from .env file
+    const envVars: Record<string, string> = {};
+    envContent.split('\n').forEach((line: string) => {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith('#')) {
+        const match = trimmed.match(/^([^=]+)=(.*)$/);
+        if (match) {
+          const key = match[1].trim();
+          const value = match[2].split('#')[0].trim(); // Remove inline comments
+          if (value) {
+            envVars[key] = value;
+          }
+        }
+      }
+    });
+
     return new Promise((resolve, reject) => {
       this.serverProcess = spawn('node', [serverScript], {
         cwd: serverDir,
         stdio: 'inherit',
         env: {
           ...process.env,
+          ...envVars, // Include all variables from .env file
           NODE_ENV: this.config.development.nodeEnv,
           DEBUG: this.config.development.debugMode ? '*' : '',
         },
