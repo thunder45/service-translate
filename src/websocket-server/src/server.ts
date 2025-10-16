@@ -197,18 +197,34 @@ app.use(cors({
 const io = new SocketIOServer(server, {
   cors: {
     origin: (origin, callback) => {
-      const allowedOrigins = [
-        'http://localhost:3000',
-        'http://localhost:8080',
-        'http://127.0.0.1:3000',
-        'http://127.0.0.1:8080'
-      ];
-      // Allow Electron (file:// protocol has no origin) and allowed origins
-      if (!origin || allowedOrigins.includes(origin)) {
+      // Allow Electron (file:// protocol has no origin)
+      if (!origin) {
         callback(null, true);
-      } else {
-        console.warn('CORS blocked origin:', origin);
-        callback(new Error('Not allowed by CORS'));
+        return;
+      }
+
+      // Parse the origin to extract hostname
+      try {
+        const url = new URL(origin);
+        const hostname = url.hostname;
+        
+        // Allow localhost, 127.0.0.1, and all local network IPs (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
+        const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+        const isLocalNetwork = 
+          /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname) ||     // 192.168.x.x
+          /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||  // 10.x.x.x
+          /^172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname); // 172.16-31.x.x
+        
+        if (isLocalhost || isLocalNetwork) {
+          console.log(`CORS allowed origin: ${origin}`);
+          callback(null, true);
+        } else {
+          console.warn('CORS blocked origin:', origin);
+          callback(new Error('Not allowed by CORS'));
+        }
+      } catch (e) {
+        console.warn('CORS - invalid origin format:', origin);
+        callback(new Error('Invalid origin format'));
       }
     },
     methods: ["GET", "POST"],

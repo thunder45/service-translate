@@ -1337,23 +1337,34 @@ class ServiceTranslateClient {
       urls.push(this.connectedServerUrl);
     }
     
-    // Default local server
-    urls.push('ws://localhost:3001');
+    // PRIORITY 1: Use the same hostname as the current page
+    // This ensures when accessing via IP, we connect to WebSocket on same IP
+    const currentHostname = window.location.hostname;
+    const websocketPort = 3001;
     
-    // Try current host with different port
-    if (window.location.hostname !== 'localhost') {
-      urls.push(`http://${window.location.hostname}:3001`);
+    if (currentHostname && currentHostname !== 'localhost' && currentHostname !== '127.0.0.1') {
+      // Use current hostname first (most likely to work)
+      urls.push(`http://${currentHostname}:${websocketPort}`);
+      console.log(`Primary WebSocket URL: http://${currentHostname}:${websocketPort}`);
     }
     
-    // Common local network IPs
+    // PRIORITY 2: Try localhost
+    urls.push(`ws://localhost:${websocketPort}`);
+    urls.push(`http://localhost:${websocketPort}`);
+    urls.push(`http://127.0.0.1:${websocketPort}`);
+    
+    // PRIORITY 3: Try common local network IPs (if not already added)
     const commonIPs = [
       '192.168.1.100', '192.168.1.101', '192.168.1.102',
       '192.168.0.100', '192.168.0.101', '192.168.0.102',
+      '192.168.178.100', '192.168.178.101', '192.168.178.129',
       '10.0.0.100', '10.0.0.101', '10.0.0.102'
     ];
     
     commonIPs.forEach(ip => {
-      urls.push(`http://${ip}:3001`);
+      if (ip !== currentHostname) {
+        urls.push(`http://${ip}:${websocketPort}`);
+      }
     });
     
     // Remove duplicates
