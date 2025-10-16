@@ -5,10 +5,10 @@
  * Serves the Progressive Web Application for client devices
  */
 
-import * as express from 'express';
+import express from 'express';
 import * as path from 'path';
 import * as fs from 'fs';
-import * as cors from 'cors';
+import cors from 'cors';
 import { loadEnvironmentConfig } from '../config/environment';
 import { getNetworkInfo } from '../config/network-config';
 
@@ -61,6 +61,10 @@ class PWAServerStarter {
 
     // Serve static files with proper headers
     this.app.use(express.static(path.join(process.cwd(), 'src', 'client-pwa'), {
+      index: 'index.html', // Explicitly serve index.html for directory requests
+      dotfiles: 'ignore', // Don't serve hidden files like .git, .env
+      redirect: false, // Don't redirect to trailing slash
+      fallthrough: true, // Allow falling through to other handlers
       setHeaders: (res, filePath) => {
         // Set PWA-specific headers
         if (filePath.endsWith('.html')) {
