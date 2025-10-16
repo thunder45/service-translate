@@ -23,6 +23,96 @@ if ! command -v sox &> /dev/null; then
 fi
 echo "✅ SoX installed ($(sox --version | head -1))"
 
+# Configure macOS Packet Filter firewall
+echo ""
+echo "Configuring firewall rules for network access..."
+echo "This requires sudo permissions to modify system firewall settings."
+echo ""
+
+# Create the anchor rules file
+ANCHOR_FILE="/etc/pf.anchors/service-translate"
+sudo tee "$ANCHOR_FILE" > /dev/null << 'EOF'
+# Service Translate - Allow incoming connections on ports 8080 and 3001
+# Port 8080: PWA web server
+# Port 3001: WebSocket server
+
+# Allow TCP traffic on port 8080 (PWA server)
+pass in proto tcp from any to any port 8080
+
+# Allow TCP traffic on port 3001 (WebSocket server)
+pass in proto tcp from any to any port 3001
+EOF
+
+if [ $? -eq 0 ]; then
+    echo "✅ Created firewall anchor rules at $ANCHOR_FILE"
+else
+    echo "❌ Failed to create firewall anchor rules"
+    exit 1
+fi
+
+# Check if anchor is already loaded in pf.conf
+if ! sudo grep -q "service-translate" /etc/pf.conf; then
+    echo "Adding anchor reference to /etc/pf.conf..."
+    
+    # Backup pf.conf
+    sudo cp /etc/pf.conf /etc/pf.conf.backup.$(date +%Y%m%d_%H%M%S)
+    
+    # Add the anchor load line before the first anchor line or at the end
+    if sudo grep -q "^anchor" /etc/pf.conf; then
+        # Insert before first anchor line
+        sudo sed -i.tmp '/^anchor/i\
+load anchor "service-translate" from "/etc/pf.anchors/service-translate"
+' /etc/pf.conf
+        sudo rm /etc/pf.conf.tmp
+    else
+        # Append at the end
+        echo 'load anchor "service-translate" from "/etc/pf.anchors/service-translate"' | sudo tee -a /etc/pf.conf > /dev/null
+    fi
+    
+    echo "✅ Added anchor reference to pf.conf"
+else
+    echo "✅ Anchor reference already exists in pf.conf"
+fi
+
+# Apply firewall configuration
+echo "Applying firewall rules..."
+
+# Check if pf is currently enabled
+if sudo pfctl -s info 2>/dev/null | grep -q "Status: Enabled"; then
+    echo "Packet filter is enabled"
+    
+    # Reload just our anchor without touching system rules
+    echo "Loading service-translate anchor rules..."
+    sudo pfctl -a service-translate -f /etc/pf.anchors/service-translate 2>/dev/null
+    if [ $? -eq 0 ]; then
+        echo "✅ Anchor rules loaded successfully"
+    else
+        echo "⚠️  Anchor rules may already be loaded (this is normal)"
+    fi
+else
+    echo "Packet filter is disabled"
+    echo "Enabling packet filter (this will load all rules including our anchor)..."
+    sudo pfctl -e -f /etc/pf.conf 2>/dev/null
+    if [ $? -eq 0 ]; then
+        echo "✅ Packet filter enabled with new rules"
+    else
+        # Fallback: try enabling without reload
+        sudo pfctl -e 2>/dev/null
+        if [ $? -eq 0 ]; then
+            echo "✅ Packet filter enabled"
+            # Then load our anchor
+            sudo pfctl -a service-translate -f /etc/pf.anchors/service-translate 2>/dev/null
+            echo "✅ Anchor rules loaded"
+        else
+            echo "⚠️  Could not enable packet filter"
+            echo "ℹ️  Your system may not use pf for firewalling"
+            echo "ℹ️  Try accessing the service via IP - it may work without pf changes"
+        fi
+    fi
+fi
+
+echo "✅ Firewall configured to allow ports 8080 and 3001"
+
 # Install dependencies
 echo ""
 echo "Installing dependencies..."
