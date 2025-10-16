@@ -189,7 +189,33 @@ const securityMiddleware = new SecurityMiddleware(securityConfig);
 
 // Configure CORS for local development
 app.use(cors({
-  origin: ["http://localhost:3000", "http://localhost:8080", "http://127.0.0.1:3000"],
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+
+    try {
+      const url = new URL(origin);
+      const hostname = url.hostname;
+      
+      // Allow localhost, 127.0.0.1, and all local network IPs
+      const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+      const isLocalNetwork = 
+        /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname) ||     // 192.168.x.x
+        /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||  // 10.x.x.x
+        /^172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname); // 172.16-31.x.x
+      
+      if (isLocalhost || isLocalNetwork) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    } catch (e) {
+      callback(new Error('Invalid origin format'));
+    }
+  },
   credentials: true
 }));
 
