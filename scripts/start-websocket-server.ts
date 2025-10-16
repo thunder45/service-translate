@@ -46,7 +46,7 @@ class WebSocketServerStarter {
       // Check directory setup
       this.checkDirectorySetup(serverDir);
 
-      const serverScript = path.join(serverDir, 'dist', 'server.js');
+      const serverScript = path.join(serverDir, 'dist', 'websocket-server', 'src', 'server.js');
 
       // Build if needed
       await this.buildServer(serverDir);
