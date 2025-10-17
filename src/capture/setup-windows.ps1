@@ -100,6 +100,66 @@ try {
     exit 1
 }
 
+# Configure Windows Firewall
+Write-Host ""
+Write-Host "Configuring Windows Firewall rules for network access..." -ForegroundColor Green
+Write-Host "This requires Administrator privileges to modify firewall settings." -ForegroundColor Yellow
+Write-Host ""
+
+if (-not $isAdmin) {
+    Write-Host "WARNING: Not running as Administrator - skipping firewall configuration" -ForegroundColor Yellow
+    Write-Host "To configure firewall manually, run this script as Administrator or see docs/WINDOWS_FIREWALL_SETUP.md" -ForegroundColor Yellow
+} else {
+    try {
+        # Remove existing rules if they exist (to avoid duplicates)
+        Write-Host "Removing existing firewall rules (if any)..." -ForegroundColor Gray
+        netsh advfirewall firewall delete rule name="Service Translate - PWA Server (TCP 8080)" 2>$null | Out-Null
+        netsh advfirewall firewall delete rule name="Service Translate - WebSocket Server (TCP 3001)" 2>$null | Out-Null
+        
+        # Add rule for PWA server (port 8080)
+        Write-Host "Adding firewall rule for PWA server (port 8080)..." -ForegroundColor Gray
+        $result = netsh advfirewall firewall add rule `
+            name="Service Translate - PWA Server (TCP 8080)" `
+            dir=in `
+            action=allow `
+            protocol=TCP `
+            localport=8080 `
+            profile=private `
+            description="Allow incoming connections to Service Translate PWA web server"
+        
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to add PWA server firewall rule"
+        }
+        
+        # Add rule for WebSocket server (port 3001)
+        Write-Host "Adding firewall rule for WebSocket server (port 3001)..." -ForegroundColor Gray
+        $result = netsh advfirewall firewall add rule `
+            name="Service Translate - WebSocket Server (TCP 3001)" `
+            dir=in `
+            action=allow `
+            protocol=TCP `
+            localport=3001 `
+            profile=private `
+            description="Allow incoming connections to Service Translate WebSocket server"
+        
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to add WebSocket server firewall rule"
+        }
+        
+        Write-Host "Firewall rules configured successfully" -ForegroundColor Green
+        Write-Host "  - Port 8080: PWA web server" -ForegroundColor White
+        Write-Host "  - Port 3001: WebSocket server" -ForegroundColor White
+        Write-Host ""
+        Write-Host "Note: Rules are applied to 'Private' network profile only" -ForegroundColor Yellow
+        Write-Host "If connecting from other devices doesn't work, ensure your network is set to 'Private'" -ForegroundColor Yellow
+        
+    } catch {
+        Write-Host "Failed to configure Windows Firewall: $_" -ForegroundColor Red
+        Write-Host "You may need to configure firewall rules manually" -ForegroundColor Yellow
+        Write-Host "See: docs/WINDOWS_FIREWALL_SETUP.md" -ForegroundColor Yellow
+    }
+}
+
 Write-Host ""
 Write-Host "Setup complete!" -ForegroundColor Green
 Write-Host ""
