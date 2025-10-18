@@ -774,12 +774,6 @@ class ServiceTranslateClient {
       return;
     }
 
-    // Basic session ID validation
-    if (!this.validateSessionId(sessionId)) {
-      this.showStatus('Invalid session ID format. Expected format: CHURCH-2025-001', 'error');
-      return;
-    }
-
     this.showLoading(true, 'Connecting to server...');
     this.showStatus('Connecting to session...', 'info');
 

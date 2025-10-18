@@ -34,14 +34,6 @@ export class MessageValidator {
            ['high', 'medium', 'low'].includes(quality);
   }
 
-  /**
-   * Validate session ID format (CHURCH-YYYY-NNN)
-   */
-  static isValidSessionId(sessionId: any): boolean {
-    if (typeof sessionId !== 'string') return false;
-    const pattern = /^CHURCH-\d{4}-\d{3}$/;
-    return pattern.test(sessionId);
-  }
 
   /**
    * Validate start session message
@@ -53,10 +45,6 @@ export class MessageValidator {
 
     if (data.type !== 'start-session') {
       return { valid: false, error: 'Invalid message type' };
-    }
-
-    if (!this.isValidSessionId(data.sessionId)) {
-      return { valid: false, error: 'Invalid session ID format. Expected: CHURCH-YYYY-NNN' };
     }
 
     if (!data.config || typeof data.config !== 'object') {
@@ -96,10 +84,6 @@ export class MessageValidator {
       return { valid: false, error: 'Invalid message type' };
     }
 
-    if (!this.isValidSessionId(data.sessionId)) {
-      return { valid: false, error: 'Invalid session ID format' };
-    }
-
     if (!this.isValidTargetLanguage(data.preferredLanguage)) {
       return { valid: false, error: 'Invalid preferred language' };
     }
@@ -132,11 +116,7 @@ export class MessageValidator {
       return { valid: false, error: 'Invalid message type' };
     }
 
-    if (!this.isValidSessionId(data.sessionId)) {
-      return { valid: false, error: 'Invalid session ID format' };
-    }
-
-    return { 
+    return {
       valid: true, 
       message: data as LeaveSessionMessage 
     };
@@ -152,10 +132,6 @@ export class MessageValidator {
 
     if (data.type !== 'change-language') {
       return { valid: false, error: 'Invalid message type' };
-    }
-
-    if (!this.isValidSessionId(data.sessionId)) {
-      return { valid: false, error: 'Invalid session ID format' };
     }
 
     if (!this.isValidTargetLanguage(data.newLanguage)) {
@@ -178,10 +154,6 @@ export class MessageValidator {
 
     if (data.type !== 'config-update') {
       return { valid: false, error: 'Invalid message type' };
-    }
-
-    if (!this.isValidSessionId(data.sessionId)) {
-      return { valid: false, error: 'Invalid session ID format' };
     }
 
     // Reuse the config validation from start session
@@ -211,10 +183,6 @@ export class MessageValidator {
 
     if (data.type !== 'translation') {
       return { valid: false, error: 'Invalid message type' };
-    }
-
-    if (!this.isValidSessionId(data.sessionId)) {
-      return { valid: false, error: 'Invalid session ID format' };
     }
 
     if (typeof data.text !== 'string' || data.text.trim().length === 0) {

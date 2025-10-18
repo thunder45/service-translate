@@ -77,13 +77,8 @@ export class SessionSecurity {
    * Validate session ID
    */
   public validateSessionId(sessionId: string): boolean {
-    // Basic format validation
-    if (!this.isValidFormat(sessionId)) {
-      return false;
-    }
-
     if (!this.config.secureIds) {
-      // For non-secure mode, just check format
+      // For non-secure mode, accept any session ID
       return true;
     }
 
@@ -136,14 +131,6 @@ export class SessionSecurity {
     return Array.from(this.activeSessions.values());
   }
 
-  /**
-   * Check if session format is valid
-   */
-  public isValidFormat(sessionId: string): boolean {
-    // Format: PREFIX-YYYY-NNN (e.g., CHURCH-2025-001)
-    const pattern = new RegExp(`^${this.config.idPrefix}-\\d{4}-\\d{3}$`);
-    return pattern.test(sessionId);
-  }
 
   /**
    * Generate cryptographic signature for session
