@@ -63,7 +63,7 @@ try {
 } catch {
     Write-Host "Failed to install sox: $_" -ForegroundColor Red
     Write-Host "Please install manually from https://sourceforge.net/projects/sox/" -ForegroundColor Yellow
-    exit 1
+    #exit 1
 }
 
 # Install Node.js dependencies
