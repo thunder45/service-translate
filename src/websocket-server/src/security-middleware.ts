@@ -92,9 +92,9 @@ export class SecurityMiddleware {
    * Validate session join request
    */
   public validateSessionJoin(context: SecurityContext, sessionId: string): boolean {
-    // Validate session ID format and security
+    // Validate session security (signature/expiration in secure mode only)
     if (!this.sessionSecurity.validateSessionId(sessionId)) {
-      this.logSecurityEvent('SESSION_INVALID', context.clientId, context.ipAddress, `Invalid session ID: ${sessionId}`);
+      this.logSecurityEvent('SESSION_SECURITY_FAILED', context.clientId, context.ipAddress, `Session security validation failed: ${sessionId}`);
       return false;
     }
 
