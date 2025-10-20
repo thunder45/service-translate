@@ -796,16 +796,6 @@ class ServiceTranslateClient {
     }
   }
 
-  validateSessionId(sessionId) {
-    // Accept various session ID formats:
-    // - CHURCH-2025-001 (human readable)
-    // - SESSION-123 (simple format)
-    // - ABC123 (short format)
-    // - Any alphanumeric with dashes
-    const sessionIdPattern = /^[A-Z0-9][A-Z0-9\-]*[A-Z0-9]$|^[A-Z0-9]+$/;
-    return sessionIdPattern.test(sessionId) && sessionId.length >= 3 && sessionId.length <= 50;
-  }
-
   leaveSession() {
     // Send leave message to server
     if (this.socket && this.socket.connected && this.currentSession) {
