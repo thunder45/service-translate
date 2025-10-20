@@ -767,7 +767,7 @@ class ServiceTranslateClient {
   }
 
   async joinSession() {
-    const sessionId = this.elements.sessionIdInput.value.trim().toUpperCase();
+    const sessionId = this.elements.sessionIdInput.value.trim();
     
     if (!sessionId) {
       this.showStatus('Please enter a session ID', 'error');
