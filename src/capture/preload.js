@@ -6,10 +6,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveConfig: (config) => ipcRenderer.invoke('save-config', config),
   getAudioDevices: () => ipcRenderer.invoke('get-audio-devices'),
   
-  // Authentication (legacy Cognito)
-  checkStoredCredentials: () => ipcRenderer.invoke('check-stored-credentials'),
-  login: (credentials) => ipcRenderer.invoke('login', credentials),
-  logout: () => ipcRenderer.invoke('logout'),
+  // Authentication (Cognito)
   changePassword: (credentials) => ipcRenderer.invoke('change-password', credentials),
   
   // Admin authentication

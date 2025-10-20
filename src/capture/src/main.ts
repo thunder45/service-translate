@@ -36,61 +36,10 @@ function getServerConfig(config: any): ServerConfig {
   return { host, port };
 }
 
-interface StoredCredentials {
-  username: string;
-  token: string;
-  expiresAt: number;
-}
-
-function storeCredentials(username: string, token: string): void {
-  const credentials: StoredCredentials = {
-    username,
-    token,
-    expiresAt: Date.now() + (24 * 60 * 60 * 1000) // 24 hours
-  };
-  
-  if (safeStorage.isEncryptionAvailable()) {
-    const encrypted = safeStorage.encryptString(JSON.stringify(credentials));
-    const credentialsPath = path.join(app.getPath('userData'), 'credentials.dat');
-    fs.writeFileSync(credentialsPath, encrypted);
-  }
-}
-
-function loadStoredCredentials(): StoredCredentials | null {
-  try {
-    const credentialsPath = path.join(app.getPath('userData'), 'credentials.dat');
-    if (!fs.existsSync(credentialsPath)) return null;
-    
-    if (safeStorage.isEncryptionAvailable()) {
-      const encrypted = fs.readFileSync(credentialsPath);
-      const decrypted = safeStorage.decryptString(encrypted);
-      const credentials: StoredCredentials = JSON.parse(decrypted);
-      
-      if (credentials.expiresAt > Date.now()) {
-        return credentials;
-      }
-    }
-  } catch (error) {
-    console.error('Failed to load stored credentials:', error);
-  }
-  return null;
-}
-
-function clearStoredCredentials(): void {
-  try {
-    const credentialsPath = path.join(app.getPath('userData'), 'credentials.dat');
-    if (fs.existsSync(credentialsPath)) {
-      fs.unlinkSync(credentialsPath);
-    }
-  } catch (error) {
-    console.error('Failed to clear stored credentials:', error);
-  }
-}
-
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
-    height: 800,
+    height: 1200,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -160,19 +109,6 @@ ipcMain.handle('save-config', (_, config) => {
 });
 
 // Authentication
-ipcMain.handle('check-stored-credentials', async () => {
-  const stored = loadStoredCredentials();
-  if (stored) {
-    (global as any).authToken = stored.token;
-    // Load config for stored credentials
-    const config = loadConfig();
-    if (config) {
-      (global as any).config = config;
-    }
-    return { success: true, username: stored.username };
-  }
-  return { success: false };
-});
 
 ipcMain.handle('get-audio-devices', async () => {
   try {
@@ -276,12 +212,6 @@ ipcMain.handle('request-microphone-permission', async () => {
   }
 });
 
-ipcMain.handle('logout', async () => {
-  clearStoredCredentials();
-  (global as any).authToken = null;
-  (global as any).config = null;
-  return { success: true };
-});
 
 // Admin authentication handlers
 ipcMain.handle('admin-authenticate', async (_, credentials: { username: string; password: string }) => {
@@ -411,26 +341,6 @@ ipcMain.handle('refresh-admin-token', async (_, data: { refreshToken: string; ad
   }
 });
 
-ipcMain.handle('login', async (_, credentials) => {
-  if (!cognitoAuth) {
-    cognitoAuth = new CognitoAuth({
-      userPoolId: credentials.userPoolId,
-      clientId: credentials.clientId,
-      region: credentials.region,
-    });
-  }
-
-  const tokens = await cognitoAuth.login(credentials.username, credentials.password);
-  
-  // Store credentials securely
-  storeCredentials(credentials.username, tokens.accessToken);
-  
-  // Store token globally for streaming manager
-  (global as any).authToken = tokens.accessToken;
-  (global as any).config = credentials;
-  
-  return { success: true, token: tokens.accessToken };
-});
 
 ipcMain.handle('change-password', async (_, credentials) => {
   if (!cognitoAuth) {
@@ -966,14 +876,6 @@ function clearStoredAdminTokens(): void {
   }
 }
 
-// Token storage helpers (legacy Cognito)
-function saveAuthToken(token: string, config: any) {
-  if (safeStorage.isEncryptionAvailable()) {
-    const encrypted = safeStorage.encryptString(JSON.stringify({ token, config, timestamp: Date.now() }));
-    const tokenPath = path.join(app.getPath('userData'), 'auth-token');
-    fs.writeFileSync(tokenPath, encrypted);
-  }
-}
 
 // Holyrics control handlers
 ipcMain.handle('clear-holyrics', async () => {
@@ -1034,22 +936,3 @@ ipcMain.handle('test-holyrics-connection', async () => {
     return { success: false, error: error.message };
   }
 });
-
-function loadAuthToken() {
-  try {
-    const tokenPath = path.join(app.getPath('userData'), 'auth-token');
-    if (fs.existsSync(tokenPath)) {
-      const encrypted = fs.readFileSync(tokenPath);
-      const decrypted = safeStorage.decryptString(encrypted);
-      const data = JSON.parse(decrypted);
-      
-      // Check if token is less than 6 hours old
-      if (Date.now() - data.timestamp < 6 * 60 * 60 * 1000) {
-        return data;
-      }
-    }
-  } catch (error) {
-    console.error('Failed to load auth token:', error);
-  }
-  return null;
-}
