@@ -65,20 +65,35 @@
      * Format: { original: string, translations: { en: string, es: string, ... } }
      */
     function setupTranslationHandlers() {
+        console.log('🔍 [DEBUG] Setting up translation handlers');
+        
         window.electronAPI.onTranslation((result) => {
-            console.log('Translation event received:', result);
+            console.log('🔍 [DEBUG] Translation event received in event-handlers.js:', result);
+            console.log('🔍 [DEBUG] Result type:', typeof result);
+            console.log('🔍 [DEBUG] Result keys:', Object.keys(result));
             
             // Handle translations object (keys are language codes, values are translated text)
             if (result.translations && typeof result.translations === 'object') {
+                console.log('🔍 [DEBUG] Processing translations object');
+                console.log('🔍 [DEBUG] Translation keys:', Object.keys(result.translations));
+                
                 Object.entries(result.translations).forEach(([lang, text]) => {
+                    console.log(`🔍 [DEBUG] Processing translation for ${lang}: ${text}`);
                     const tabContent = window.utils.getElement(`translation-${lang}`);
+                    console.log(`🔍 [DEBUG] Tab element for ${lang}:`, tabContent ? 'FOUND' : 'NOT FOUND');
+                    
                     if (!tabContent) {
                         console.warn(`Translation tab not found: translation-${lang}`);
                         return;
                     }
 
                     // Add translation text (always final, no partial updates from broadcast)
-                    tabContent.innerHTML += (tabContent.innerHTML.trim() ? '<br>' : '') + text;
+                    const currentContent = tabContent.innerHTML.trim();
+                    console.log(`🔍 [DEBUG] Current content length: ${currentContent.length}`);
+                    const newContent = currentContent + (currentContent ? '<br>' : '') + text;
+                    console.log(`🔍 [DEBUG] New content: ${newContent}`);
+                    tabContent.innerHTML = newContent;
+                    console.log(`🔍 [DEBUG] Content updated for ${lang}`);
                     
                     // Auto-scroll to bottom
                     tabContent.scrollTop = tabContent.scrollHeight;
@@ -89,8 +104,12 @@
                     const totalCharacters = result.original.length * Object.keys(result.translations).length;
                     window.costTracker.trackTranslateUsage(totalCharacters);
                 }
+            } else {
+                console.error('🔍 [DEBUG] No translations object found or wrong type');
             }
         });
+        
+        console.log('🔍 [DEBUG] Translation handler setup complete');
     }
 
     /**

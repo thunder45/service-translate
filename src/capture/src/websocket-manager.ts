@@ -789,8 +789,13 @@ export class WebSocketManager extends EventEmitter {
 
     // Handle translation messages from server
     this.socket.on('translation', (data) => {
-      console.log('Translation message received from server:', data);
+      console.log('🔍 [DEBUG WEBSOCKET-MANAGER.TS] Translation message received from server');
+      console.log('🔍 [DEBUG WEBSOCKET-MANAGER.TS] Data:', data);
+      console.log('🔍 [DEBUG WEBSOCKET-MANAGER.TS] Data type:', typeof data);
+      console.log('🔍 [DEBUG WEBSOCKET-MANAGER.TS] Data keys:', Object.keys(data));
+      console.log('🔍 [DEBUG WEBSOCKET-MANAGER.TS] Emitting translation event...');
       this.emit('translation', data);
+      console.log('🔍 [DEBUG WEBSOCKET-MANAGER.TS] Event emitted');
     });
   }
 
