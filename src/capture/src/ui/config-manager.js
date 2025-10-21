@@ -221,6 +221,31 @@
         }
     }
 
+    /**
+     * Switch between configuration tabs
+     */
+    function switchConfigTab(tabName) {
+        // Update tab buttons
+        const buttons = document.querySelectorAll('#config-panel .tab-button');
+        buttons.forEach(btn => {
+            if (btn.textContent.toLowerCase().includes(tabName.toLowerCase())) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+        
+        // Update tab content
+        const contents = document.querySelectorAll('#config-panel .tab-content');
+        contents.forEach(content => {
+            if (content.id === `config-${tabName}`) {
+                content.classList.add('active');
+            } else {
+                content.classList.remove('active');
+            }
+        });
+    }
+
     // Export public API
     window.configManager = {
         loadAudioDevices,
@@ -230,6 +255,11 @@
         saveConfig,
         toggleConfigPanel
     };
+
+    // Export global functions for onclick handlers  
+    window.switchConfigTab = switchConfigTab;
+    window.saveConfig = saveConfig;
+    window.showConfig = toggleConfigPanel;
 
     // Auto-load configuration on module initialization
     loadConfiguration();
