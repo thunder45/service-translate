@@ -540,10 +540,23 @@ ipcMain.handle('create-session', async (_, sessionId, providedConfig) => {
   return { success: false, error: 'WebSocket manager not initialized' };
 });
 
-ipcMain.handle('end-session', async () => {
+ipcMain.handle('end-session', async (_, sessionId = null) => {
   if (webSocketManager) {
     try {
-      await webSocketManager.endSession();
+      if (sessionId) {
+        // End specific session by ID
+        if (!webSocketManager.isConnectedToServer()) {
+          throw new Error('Not connected to WebSocket server');
+        }
+        
+        const socket = (webSocketManager as any).socket;
+        if (socket) {
+          socket.emit('end-session', { sessionId });
+        }
+      } else {
+        // End current session (original behavior)
+        await webSocketManager.endSession();
+      }
       return { success: true };
     } catch (error: any) {
       return { success: false, error: error.message };

@@ -29,7 +29,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   connectWebSocket: () => ipcRenderer.invoke('connect-websocket'),
   disconnectWebSocket: () => ipcRenderer.invoke('disconnect-websocket'),
   createSession: (sessionId, config) => ipcRenderer.invoke('create-session', sessionId, config),
-  endSession: () => ipcRenderer.invoke('end-session'),
+  endSession: (sessionId) => ipcRenderer.invoke('end-session', sessionId),
   listSessions: () => ipcRenderer.invoke('list-sessions'),
   setCurrentSession: (config) => ipcRenderer.invoke('set-current-session', config),
   updateSessionConfig: (config) => ipcRenderer.invoke('update-session-config', config),
