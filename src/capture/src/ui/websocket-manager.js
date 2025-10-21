@@ -199,8 +199,8 @@
             window.uiManager.updateLastActivity('Data refreshed');
         }
         
-        // Update Polly cost from health endpoint
-        if (healthData.ttsCosts && window.costTracker) {
+        // Update Polly cost from health endpoint (only if costTracker is initialized)
+        if (healthData.ttsCosts && window.costTracker && window.costTracker.polly) {
             window.costTracker.polly.cost = healthData.ttsCosts.totalCost || 0;
             window.costTracker.polly.characters = healthData.ttsCosts.characters || 0;
             window.costTracker.updateCostDisplay();

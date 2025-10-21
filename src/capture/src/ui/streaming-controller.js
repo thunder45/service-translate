@@ -110,12 +110,12 @@
      */
     function clearTranslationPanels() {
         const panels = [
-            { id: 'tab-pt-BR', text: 'Listening...' },
-            { id: 'tab-en-US', text: 'Waiting for English translations...' },
-            { id: 'tab-es-ES', text: 'Waiting for Spanish translations...' },
-            { id: 'tab-fr-FR', text: 'Waiting for French translations...' },
-            { id: 'tab-de-DE', text: 'Waiting for German translations...' },
-            { id: 'tab-it-IT', text: 'Waiting for Italian translations...' }
+            { id: 'translation-pt', text: 'Portuguese transcription will appear here...' },
+            { id: 'translation-en', text: 'English translation will appear here...' },
+            { id: 'translation-es', text: 'Spanish translation will appear here...' },
+            { id: 'translation-fr', text: 'French translation will appear here...' },
+            { id: 'translation-de', text: 'German translation will appear here...' },
+            { id: 'translation-it', text: 'Italian translation will appear here...' }
         ];
 
         panels.forEach(panel => {
