@@ -29,7 +29,7 @@
     async function adminLogin() {
         const usernameInput = window.utils.getElement('admin-username');
         const passwordInput = window.utils.getElement('admin-password');
-        const loginBtn = window.utils.getElement('login-btn');
+        const loginBtn = window.utils.getElement('admin-login-btn');
 
         const username = usernameInput?.value?.trim();
         const password = passwordInput?.value;

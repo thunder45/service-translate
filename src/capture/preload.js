@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   adminAuthenticateWithToken: (data) => ipcRenderer.invoke('admin-authenticate-with-token', data),
   refreshAdminToken: (data) => ipcRenderer.invoke('refresh-admin-token', data),
   loadStoredAdminTokens: () => ipcRenderer.invoke('load-stored-admin-tokens'),
+  storeAdminTokens: (data) => ipcRenderer.invoke('store-admin-tokens', data),
   clearAdminTokens: () => ipcRenderer.invoke('clear-admin-tokens'),
   
   // Local streaming
