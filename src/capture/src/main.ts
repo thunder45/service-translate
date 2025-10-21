@@ -476,6 +476,12 @@ ipcMain.handle('connect-websocket', async () => {
         console.log('Admin auth failed:', error);
         mainWindow?.webContents.send('admin-auth-failed', error);
       });
+      
+      // Listen for translation events from WebSocketManager
+      webSocketManager.on('translation', (data) => {
+        console.log('Translation event from WebSocketManager:', data);
+        mainWindow?.webContents.send('translation', data);
+      });
     } else {
       console.log('WebSocketManager already exists, reusing');
     }
