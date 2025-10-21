@@ -61,32 +61,34 @@
 
     /**
      * Setup translation result handlers
+     * Handles translation data from broadcast-translation messages
+     * Format: { original: string, translations: { en: string, es: string, ... } }
      */
     function setupTranslationHandlers() {
         window.electronAPI.onTranslation((result) => {
-            result.translations.forEach(translation => {
-                const tabContent = window.utils.getElement(`translation-${translation.targetLanguage}`);
-                if (!tabContent) {
-                    console.warn(`Translation tab not found: translation-${translation.targetLanguage}`);
-                    return;
-                }
-
-                if (translation.isPartial) {
-                    // Update partial translation (shown in italics)
-                    tabContent.innerHTML = tabContent.innerHTML.split('<br><em>')[0] + '<br><em>' + translation.text + '</em>';
-                } else {
-                    // Add final translation (remove partial, add new line)
-                    tabContent.innerHTML = tabContent.innerHTML.replace(/<br><em>.*<\/em>/, '') + '<br>' + translation.text;
-                }
-                
-                // Auto-scroll to bottom
-                tabContent.scrollTop = tabContent.scrollHeight;
-            });
+            console.log('Translation event received:', result);
             
-            // Track translation usage for cost calculation
-            if (result.originalText && result.translations) {
-                const totalCharacters = result.originalText.length * result.translations.length;
-                window.costTracker.trackTranslateUsage(totalCharacters);
+            // Handle translations object (keys are language codes, values are translated text)
+            if (result.translations && typeof result.translations === 'object') {
+                Object.entries(result.translations).forEach(([lang, text]) => {
+                    const tabContent = window.utils.getElement(`translation-${lang}`);
+                    if (!tabContent) {
+                        console.warn(`Translation tab not found: translation-${lang}`);
+                        return;
+                    }
+
+                    // Add translation text (always final, no partial updates from broadcast)
+                    tabContent.innerHTML += (tabContent.innerHTML.trim() ? '<br>' : '') + text;
+                    
+                    // Auto-scroll to bottom
+                    tabContent.scrollTop = tabContent.scrollHeight;
+                });
+                
+                // Track translation usage for cost calculation
+                if (result.original && result.translations) {
+                    const totalCharacters = result.original.length * Object.keys(result.translations).length;
+                    window.costTracker.trackTranslateUsage(totalCharacters);
+                }
             }
         });
     }

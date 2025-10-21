@@ -46,9 +46,39 @@ function getElement(id) {
     return element;
 }
 
+/**
+ * Switch between translation tabs
+ * 
+ * @param {string} lang - Language code (pt, en, es, fr, de, it)
+ */
+function switchTab(lang) {
+    // Update tab buttons
+    const tabs = document.querySelectorAll('.translation-tabs .tab-button');
+    tabs.forEach(tab => {
+        if (tab.getAttribute('data-lang') === lang) {
+            tab.classList.add('active');
+        } else {
+            tab.classList.remove('active');
+        }
+    });
+    
+    // Update tab content
+    const contents = document.querySelectorAll('.translation-tabs + div[data-lang], .translation-tabs ~ .tab-content[data-lang]');
+    contents.forEach(content => {
+        if (content.getAttribute('data-lang') === lang) {
+            content.classList.add('active');
+        } else {
+            content.classList.remove('active');
+        }
+    });
+}
+
 // Export functions for use in other modules
 window.utils = {
     generateSessionId,
     formatTime,
     getElement
 };
+
+// Export switchTab globally for onclick handlers
+window.switchTab = switchTab;
