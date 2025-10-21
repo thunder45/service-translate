@@ -173,33 +173,33 @@ The fix also enables proper token refresh:
 - `src/capture/src/websocket-manager.ts` - Authentication methods (already correct)
 - `src/websocket-server/src/admin-identity-manager.ts` - Server-side session management (already correct)
 
-## Legacy Code (Deprecated)
+## Legacy Code (Removed)
 
-The following functions in `main.ts` are now deprecated but left for compatibility:
-- `storeAdminTokensSecurely()` - Use SecureTokenStorage instead
-- `loadStoredAdminTokens()` - Use SecureTokenStorage instead  
-- `clearStoredAdminTokens()` - Use SecureTokenStorage instead
+The following deprecated files and code have been **completely removed**:
+- ❌ **`credentials.dat`** - Removed, no longer used
+- ❌ **`admin-tokens.dat`** - Removed, no longer used  
+- ❌ **`auth-token`** - Removed, no longer used
+- ❌ Deprecated IPC handlers - Removed and replaced with SecureTokenStorage-based handlers
 
-These IPC handlers are also deprecated:
-- `store-admin-tokens`
-- `load-stored-admin-tokens`
-- `clear-admin-tokens`
+All authentication now uses **only**:
+- ✅ **`cognito-tokens.enc`** - Encrypted Cognito tokens (active)
+- ✅ `SecureTokenStorage` class for all token operations
 
 ## Security Notes
 
 - Tokens are encrypted using Electron's `safeStorage` API
 - OS-level encryption: Keychain (macOS), DPAPI (Windows), libsecret (Linux)
-- Token files: `cognito-tokens.enc` (active), `admin-tokens.dat` (deprecated)
+- **Token Storage**: Only `cognito-tokens.enc` is used (all deprecated files removed)
 - Refresh tokens valid for 30 days (Cognito default)
 - Access tokens valid for 1 hour, auto-refresh when <10 min remaining
 
 ## Migration Path
 
 For users with existing installations:
-1. Old `admin-tokens.dat` files are ignored
-2. First login after update creates `cognito-tokens.enc`
-3. Token persistence works from that point forward
-4. No manual migration needed
+1. ❌ Old `credentials.dat`, `admin-tokens.dat`, and `auth-token` files are no longer read or created
+2. ✅ First login after update creates `cognito-tokens.enc`
+3. ✅ Token persistence works from that point forward
+4. ✅ No manual migration needed - old files can be safely deleted
 
 ## Summary
 

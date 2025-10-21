@@ -94,9 +94,11 @@ export class SecureTokenStorage {
 
       // Check if access token has expired
       if (expiresAt < new Date()) {
-        console.log('Stored access token has expired');
-        // Don't delete the file - refresh token might still be valid
-        // Return the tokens anyway so refresh token can be used
+        console.log('Stored access token has expired - clearing tokens');
+        // Clear expired tokens to force fresh login
+        // Refresh token cannot be used here without proper Cognito refresh flow
+        this.clearTokens();
+        return null;
       }
 
       return {

@@ -71,4 +71,27 @@ export class CognitoAuth {
 
     return response.AuthenticationResult!.IdToken!;
   }
+
+  async refreshToken(refreshToken: string): Promise<{ accessToken: string; idToken: string; expiresIn: number }> {
+    try {
+      const response = await this.client.send(new InitiateAuthCommand({
+        AuthFlow: 'REFRESH_TOKEN_AUTH',
+        ClientId: this.config.clientId,
+        AuthParameters: {
+          REFRESH_TOKEN: refreshToken,
+        },
+      }));
+
+      return {
+        accessToken: response.AuthenticationResult!.AccessToken!,
+        idToken: response.AuthenticationResult!.IdToken!,
+        expiresIn: response.AuthenticationResult!.ExpiresIn!
+      };
+    } catch (error: any) {
+      if (error.name === 'NotAuthorizedException') {
+        throw new Error('Refresh token expired or invalid. Please login again.');
+      }
+      throw error;
+    }
+  }
 }

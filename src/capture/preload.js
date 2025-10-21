@@ -13,7 +13,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   adminAuthenticate: (credentials) => ipcRenderer.invoke('admin-authenticate', credentials),
   adminAuthenticateWithToken: (data) => ipcRenderer.invoke('admin-authenticate-with-token', data),
   refreshAdminToken: (data) => ipcRenderer.invoke('refresh-admin-token', data),
-  storeAdminTokens: (data) => ipcRenderer.invoke('store-admin-tokens', data),
   loadStoredAdminTokens: () => ipcRenderer.invoke('load-stored-admin-tokens'),
   clearAdminTokens: () => ipcRenderer.invoke('clear-admin-tokens'),
   

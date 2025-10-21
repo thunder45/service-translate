@@ -845,39 +845,18 @@ export class WebSocketManager extends EventEmitter {
       const storedTokens = this.tokenStorage.loadTokens();
       
       if (storedTokens) {
+        // Token is valid (loadTokens returns null for expired tokens)
         console.log('Re-authenticating admin with stored Cognito tokens...');
-        
-        // Check if access token is expired
-        if (storedTokens.expiresAt < new Date()) {
-          console.log('Stored access token expired, attempting refresh...');
-          
-          // Try to refresh the token first
-          try {
-            await this.refreshCognitoToken();
-            console.log('Token refreshed, now authenticating...');
-            
-            // Authenticate with refreshed token
-            await this.adminAuthenticateWithToken();
-          } catch (refreshError) {
-            console.error('Token refresh failed:', refreshError);
-            
-            // If refresh fails, clear tokens and emit session expired
-            this.tokenStorage.clearTokens();
-            this.adminAuthState.isAuthenticated = false;
-            this.emit('session-expired', {
-              message: 'Session expired, please login again',
-              reason: 'reconnection_token_refresh_failed'
-            });
-            return;
-          }
-        } else {
-          // Token still valid, authenticate directly
-          await this.adminAuthenticateWithToken(storedTokens.accessToken);
-        }
-        
+        await this.adminAuthenticateWithToken(storedTokens.accessToken);
         console.log('Admin re-authenticated successfully');
       } else {
-        console.log('No stored tokens available for re-authentication');
+        // Tokens were expired and cleared by loadTokens
+        console.log('Stored tokens were expired or not found');
+        this.adminAuthState.isAuthenticated = false;
+        this.emit('session-expired', {
+          message: 'Session expired, please login again',
+          reason: 'reconnection_tokens_expired'
+        });
       }
     } catch (error) {
       console.error('Failed to re-authenticate admin:', error);
