@@ -786,6 +786,12 @@ export class WebSocketManager extends EventEmitter {
     this.socket.on('list-sessions-response', (response) => {
       this.emit('sessions-list-updated', response);
     });
+
+    // Handle translation messages from server
+    this.socket.on('translation', (data) => {
+      console.log('Translation message received from server:', data);
+      this.emit('translation', data);
+    });
   }
 
   private handleServerMessage(message: any): void {
