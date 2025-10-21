@@ -65,6 +65,7 @@ if (!(Test-Path "dist")) {
 # Get port from environment or default to 3001
 $port = if ($env:PORT) { $env:PORT } else { "3001" }
 
-# Start the server
+# Start the server with output redirected to log file
 Write-Host "Starting WebSocket server on port $port..." -ForegroundColor Green
-npm start
+Write-Host "Logs will be written to logs\server.log" -ForegroundColor Gray
+npm start >> logs\server.log 2>&1

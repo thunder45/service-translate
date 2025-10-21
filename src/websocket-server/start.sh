@@ -46,6 +46,10 @@ fi
 # Create required directories
 mkdir -p sessions admin-identities logs
 
-# Start the server
+# Create logs directory if it doesn't exist
+mkdir -p logs
+
+# Start the server with output redirected to log file
 echo "Starting WebSocket server on port ${PORT:-3001}..."
-npm start
+echo "Logs will be written to logs/server.log"
+npm start >> logs/server.log 2>&1

@@ -779,7 +779,7 @@ ipcMain.handle('start-websocket-server', async () => {
         ], { 
           cwd: serverPath,
           detached: true,
-          stdio: ['ignore', 'pipe', 'pipe']
+          stdio: 'ignore' // Fully detach - no pipe connections to parent
         });
       } else {
         // macOS/Linux: Use bash to run start.sh
@@ -787,70 +787,32 @@ ipcMain.handle('start-websocket-server', async () => {
           cwd: serverPath,
           detached: true,
           shell: true,
-          stdio: ['ignore', 'pipe', 'pipe']
+          stdio: 'ignore' // Fully detach - no pipe connections to parent
         });
       }
       
-      let hasResolved = false;
-      let outputBuffer = '';
+      // Unref immediately since we can't monitor output with stdio: 'ignore'
+      serverProcess.unref();
       
-      serverProcess.stdout.on('data', (data) => {
-        const output = data.toString();
-        outputBuffer += output;
-        console.log('WebSocket Server:', output);
-        
-        // Look for success indicators
-        if ((output.includes('running on port') || 
-             output.includes('Server running') ||
-             output.includes('WebSocket Server running')) && !hasResolved) {
-          hasResolved = true;
-          // Unref so the parent process can exit
-          serverProcess.unref();
-          resolve({ success: true, message: 'Server started successfully' });
-        }
-      });
-      
-      serverProcess.stderr.on('data', (data) => {
-        const output = data.toString();
-        outputBuffer += output;
-        console.error('WebSocket Server Error:', output);
-        
-        if (output.includes('EADDRINUSE') && !hasResolved) {
-          hasResolved = true;
-          resolve({ success: true, message: `Server already running on port ${port}` });
-        }
-      });
-      
-      serverProcess.on('error', (error) => {
-        if (!hasResolved) {
-          hasResolved = true;
-          reject(error);
-        }
-      });
-      
-      serverProcess.on('exit', (code) => {
-        if (!hasResolved) {
-          hasResolved = true;
-          if (code === 0) {
+      // Wait a moment for server to start, then check health
+      const checkUrl = `http://127.0.0.1:${port}/health`;
+      setTimeout(async () => {
+        try {
+          const response = await fetch(checkUrl, {
+            method: 'GET',
+            signal: AbortSignal.timeout(3000)
+          });
+          
+          if (response.ok) {
             resolve({ success: true, message: 'Server started successfully' });
           } else {
-            reject(new Error(`Server process exited with code ${code}. Output: ${outputBuffer}`));
+            resolve({ success: true, message: 'Server is starting...' });
           }
+        } catch (error) {
+          // Server might still be starting
+          resolve({ success: true, message: 'Server is starting (check status in a moment)' });
         }
-      });
-      
-      // Timeout after 30 seconds (increased to allow for npm install if needed)
-      setTimeout(() => {
-        if (!hasResolved) {
-          hasResolved = true;
-          // Server might still be starting, so don't kill it
-          serverProcess.unref();
-          resolve({ 
-            success: true, 
-            message: 'Server is starting (this may take a moment for first run)' 
-          });
-        }
-      }, 30000);
+      }, 3000);
     });
   } catch (error) {
     return { success: false, message: (error as Error).message };
