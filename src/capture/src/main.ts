@@ -479,12 +479,7 @@ ipcMain.handle('connect-websocket', async () => {
       
       // Listen for translation events from WebSocketManager
       webSocketManager.on('translation', (data) => {
-        console.log('🔍 [DEBUG MAIN.TS] Translation event received from WebSocketManager:', data);
-        console.log('🔍 [DEBUG MAIN.TS] Data type:', typeof data);
-        console.log('🔍 [DEBUG MAIN.TS] Data keys:', Object.keys(data));
-        console.log('🔍 [DEBUG MAIN.TS] Forwarding to renderer via IPC...');
         mainWindow?.webContents.send('translation', data);
-        console.log('🔍 [DEBUG MAIN.TS] IPC send complete');
       });
     } else {
       console.log('WebSocketManager already exists, reusing');

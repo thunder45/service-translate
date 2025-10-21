@@ -61,55 +61,35 @@
 
     /**
      * Setup translation result handlers
-     * Handles translation data from broadcast-translation messages
-     * Format: { original: string, translations: { en: string, es: string, ... } }
+     * Handles translation data from streaming manager
+     * Format: { originalText: string, translations: [{targetLanguage: 'en-US', text: '...'}, ...] }
      */
     function setupTranslationHandlers() {
-        console.log('🔍 [DEBUG] Setting up translation handlers');
-        
         window.electronAPI.onTranslation((result) => {
-            console.log('🔍 [DEBUG] Translation event received in event-handlers.js:', result);
-            console.log('🔍 [DEBUG] Result type:', typeof result);
-            console.log('🔍 [DEBUG] Result keys:', Object.keys(result));
-            
-            // Handle translations object (keys are language codes, values are translated text)
-            if (result.translations && typeof result.translations === 'object') {
-                console.log('🔍 [DEBUG] Processing translations object');
-                console.log('🔍 [DEBUG] Translation keys:', Object.keys(result.translations));
-                
-                Object.entries(result.translations).forEach(([lang, text]) => {
-                    console.log(`🔍 [DEBUG] Processing translation for ${lang}: ${text}`);
-                    const tabContent = window.utils.getElement(`translation-${lang}`);
-                    console.log(`🔍 [DEBUG] Tab element for ${lang}:`, tabContent ? 'FOUND' : 'NOT FOUND');
+            // Handle translations array: [{targetLanguage: 'en-US', text: '...'}, ...]
+            if (Array.isArray(result.translations)) {
+                result.translations.forEach((translation) => {
+                    const lang = translation.targetLanguage.split('-')[0]; // Extract 'en' from 'en-US'
                     
+                    const tabContent = window.utils.getElement(`translation-${lang}`);
                     if (!tabContent) {
                         console.warn(`Translation tab not found: translation-${lang}`);
                         return;
                     }
 
-                    // Add translation text (always final, no partial updates from broadcast)
+                    // Add translation text
                     const currentContent = tabContent.innerHTML.trim();
-                    console.log(`🔍 [DEBUG] Current content length: ${currentContent.length}`);
-                    const newContent = currentContent + (currentContent ? '<br>' : '') + text;
-                    console.log(`🔍 [DEBUG] New content: ${newContent}`);
-                    tabContent.innerHTML = newContent;
-                    console.log(`🔍 [DEBUG] Content updated for ${lang}`);
-                    
-                    // Auto-scroll to bottom
+                    tabContent.innerHTML = currentContent + (currentContent ? '<br>' : '') + translation.text;
                     tabContent.scrollTop = tabContent.scrollHeight;
                 });
                 
-                // Track translation usage for cost calculation
-                if (result.original && result.translations) {
-                    const totalCharacters = result.original.length * Object.keys(result.translations).length;
-                    window.costTracker.trackTranslateUsage(totalCharacters);
+                // Track translation cost
+                if (result.originalText && result.translations) {
+                    const totalChars = result.originalText.length * result.translations.length;
+                    window.costTracker.trackTranslateUsage(totalChars);
                 }
-            } else {
-                console.error('🔍 [DEBUG] No translations object found or wrong type');
             }
         });
-        
-        console.log('🔍 [DEBUG] Translation handler setup complete');
     }
 
     /**
@@ -168,6 +148,7 @@
         window.electronAPI.onClientConnected((clientInfo) => {
             console.log('Client connected:', clientInfo);
             window.uiManager.updateLastActivity('Client connected');
+            console
         });
 
         // Client disconnected from WebSocket server
