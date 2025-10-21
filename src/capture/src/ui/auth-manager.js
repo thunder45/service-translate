@@ -175,6 +175,9 @@
             if (usernameInput) usernameInput.value = '';
             if (passwordInput) passwordInput.value = '';
 
+            // Re-setup login form event handlers after logout
+            setupLoginForm();
+
             showLoginStatus('Logged out successfully', 'info');
         } catch (error) {
             console.error('Logout error:', error);
@@ -468,6 +471,48 @@
                 statusDiv.classList.add('hidden');
             }, 3000);
         }
+    }
+
+    /**
+     * Setup login form event listeners
+     */
+    function setupLoginForm() {
+        const adminUsername = window.utils.getElement('admin-username');
+        const adminPassword = window.utils.getElement('admin-password');
+        const adminLoginBtn = window.utils.getElement('admin-login-btn');
+
+        if (!adminUsername || !adminPassword || !adminLoginBtn) {
+            console.warn('Login form elements not found');
+            return;
+        }
+
+        // Remove existing event listeners to avoid duplicates
+        adminUsername.onkeypress = null;
+        adminPassword.onkeypress = null;
+        adminLoginBtn.onclick = null;
+
+        // Username field - Enter key submits
+        adminUsername.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                adminLoginBtn.click();
+            }
+        });
+
+        // Password field - Enter key submits
+        adminPassword.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                adminLoginBtn.click();
+            }
+        });
+
+        // Login button click handler
+        adminLoginBtn.addEventListener('click', async () => {
+            await adminLogin();
+        });
+
+        console.log('Login form event handlers reset');
     }
 
     // Export public API
