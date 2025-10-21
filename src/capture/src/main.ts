@@ -237,7 +237,7 @@ ipcMain.handle('admin-authenticate', async (_, credentials: { username: string; 
     
     // Store config and token globally for streaming manager
     (global as any).config = config;
-    (global as any).authToken = tokens.idToken; // Identity Pool needs ID token
+    (global as any).authToken = tokens.idToken; // Identity Pool requires ID token
     
     // Store tokens in SecureTokenStorage for WebSocket reconnection
     // This must happen even if WebSocket is not connected yet
@@ -412,7 +412,7 @@ ipcMain.handle('connect-websocket', async () => {
           // CRITICAL: Set global config and token for streaming manager
           // These are required by start-local-streaming handler
           (global as any).config = config;
-          (global as any).authToken = storedTokens.idToken;
+          (global as any).authToken = storedTokens.idToken; // Identity Pool requires ID token
           console.log('Global config and auth token set from stored tokens');
         } else {
           // Tokens were expired and cleared by loadTokens
