@@ -124,7 +124,7 @@ class EnvironmentManager {
 
       server: {
         websocket: {
-          host: this.getEnvVar('WEBSOCKET_HOST', 'localhost'),
+          host: this.getEnvVar('WEBSOCKET_HOST', '127.0.0.1'),
           port: parseInt(this.getEnvVar('WEBSOCKET_PORT', '3001')),
           corsOrigin: this.getEnvVar('WEBSOCKET_CORS_ORIGIN', '*'),
         },

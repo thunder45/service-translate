@@ -152,7 +152,7 @@ export class AudioManager {
    * Generate local network URL for audio file
    */
   private generateAudioUrl(fileName: string): string {
-    return `http://localhost:${this.serverPort}/audio/${fileName}`;
+    return `http://127.0.0.1:${this.serverPort}/audio/${fileName}`;
   }
 
   /**

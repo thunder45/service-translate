@@ -104,7 +104,7 @@ class PWAServerStarter {
         version: '1.0.0',
         services: {
           pwa: 'running',
-          websocket: `ws://localhost:${this.config.server.websocket.port}`,
+          websocket: `ws://127.0.0.1:${this.config.server.websocket.port}`,
         },
       });
     });

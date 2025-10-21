@@ -1326,15 +1326,14 @@ class ServiceTranslateClient {
     const currentHostname = window.location.hostname;
     const websocketPort = 3001;
     
-    if (currentHostname && currentHostname !== 'localhost' && currentHostname !== '127.0.0.1') {
+    if (currentHostname && currentHostname !== '127.0.0.1') {
       // Use current hostname first (most likely to work)
       urls.push(`http://${currentHostname}:${websocketPort}`);
       console.log(`Primary WebSocket URL: http://${currentHostname}:${websocketPort}`);
     }
     
-    // PRIORITY 2: Try localhost
-    urls.push(`ws://localhost:${websocketPort}`);
-    urls.push(`http://localhost:${websocketPort}`);
+    // PRIORITY 2: Try 127.0.0.1
+    urls.push(`ws://127.0.0.1:${websocketPort}`);
     urls.push(`http://127.0.0.1:${websocketPort}`);
     
     // PRIORITY 3: Try common local network IPs (if not already added)

@@ -283,9 +283,20 @@ ipcMain.handle('admin-authenticate-with-token', async (_, data: { token: string 
   }
 });
 
-ipcMain.handle('store-admin-tokens', async (_, data: AdminTokenData) => {
+ipcMain.handle('store-admin-tokens', async (_, data: { token: string; refreshToken: string; tokenExpiry: any; adminId?: string; username: string }) => {
   try {
-    storeAdminTokensSecurely(data);
+    const { SecureTokenStorage } = require('./secure-token-storage');
+    const tokenStorage = new SecureTokenStorage(app.getPath('userData'));
+    
+    const expiresAt = data.tokenExpiry ? new Date(data.tokenExpiry) : new Date(Date.now() + 3600 * 1000);
+    tokenStorage.storeTokens({
+      accessToken: data.token,
+      idToken: data.token, // Use access token as ID token for now
+      refreshToken: data.refreshToken,
+      expiresAt,
+      username: data.username
+    });
+    
     return { success: true };
   } catch (error: any) {
     console.error('Failed to store admin tokens:', error);
@@ -319,7 +330,9 @@ ipcMain.handle('load-stored-admin-tokens', async () => {
 
 ipcMain.handle('clear-admin-tokens', async () => {
   try {
-    clearStoredAdminTokens();
+    const { SecureTokenStorage } = require('./secure-token-storage');
+    const tokenStorage = new SecureTokenStorage(app.getPath('userData'));
+    tokenStorage.clearTokens();
     return { success: true };
   } catch (error: any) {
     console.error('Failed to clear admin tokens:', error);
@@ -371,7 +384,63 @@ ipcMain.handle('connect-websocket', async () => {
     
     console.log(`Using host: ${host}, port: ${port}`);
     
-    // Initialize WebSocketManager if not already created
+    // STEP 1: Check for stored tokens BEFORE connecting (fail fast)
+    const { SecureTokenStorage } = require('./secure-token-storage');
+    const tokenStorage = new SecureTokenStorage(app.getPath('userData'));
+    
+    let validatedTokens: {
+      accessToken: string;
+      idToken: string;
+      expiresIn: number;
+      username: string;
+      expiresAt: Date;
+    } | null = null;
+    let shouldAutoAuthenticate = false;
+    
+    if (tokenStorage.hasStoredTokens()) {
+      console.log('Found stored tokens, validating before connection...');
+      
+      try {
+        const storedTokens = tokenStorage.loadTokens();
+        
+        if (storedTokens) {
+          // Token is valid (loadTokens returns null for expired tokens)
+          console.log('Access token is valid, ready to connect');
+          validatedTokens = storedTokens;
+          shouldAutoAuthenticate = true;
+          
+          // CRITICAL: Set global config and token for streaming manager
+          // These are required by start-local-streaming handler
+          (global as any).config = config;
+          (global as any).authToken = storedTokens.idToken;
+          console.log('Global config and auth token set from stored tokens');
+        } else {
+          // Tokens were expired and cleared by loadTokens
+          console.log('Stored tokens were expired and cleared');
+          mainWindow?.webContents.send('admin-auth-required', {
+            reason: 'Stored credentials expired - please login again'
+          });
+        }
+      } catch (tokenError: any) {
+        console.error('Error validating stored tokens:', tokenError);
+        // Clear corrupted tokens
+        try {
+          tokenStorage.clearTokens();
+        } catch (clearError) {
+          console.error('Error clearing corrupted tokens:', clearError);
+        }
+        mainWindow?.webContents.send('admin-auth-required', {
+          reason: 'Stored credentials corrupted - please login again'
+        });
+      }
+    } else {
+      console.log('No stored tokens found - user needs to login');
+      mainWindow?.webContents.send('admin-auth-required', {
+        reason: 'No stored credentials'
+      });
+    }
+    
+    // STEP 3: Initialize WebSocketManager if not already created
     if (!webSocketManager) {
       const serverUrl = `ws://${host}:${port}`;
       console.log('Creating WebSocketManager with URL:', serverUrl);
@@ -411,73 +480,18 @@ ipcMain.handle('connect-websocket', async () => {
       console.log('WebSocketManager already exists, reusing');
     }
     
-    await webSocketManager.connect();
-    console.log('WebSocket connected successfully');
-    
-    // After successful connection, try to authenticate with stored tokens if available
-    try {
-      const { SecureTokenStorage } = require('./secure-token-storage');
-      const tokenStorage = new SecureTokenStorage(app.getPath('userData'));
+    // STEP 4: Only connect if webSocketManager doesn't already have a connection
+    // This prevents race conditions where UI layer is starting the server
+    if (!webSocketManager.isConnectedToServer()) {
+      console.log('Attempting to connect to WebSocket server...');
+      await webSocketManager.connect();
+      console.log('WebSocket connected successfully');
       
-      if (tokenStorage.hasStoredTokens()) {
-        console.log('Found stored tokens, attempting automatic authentication...');
-        const storedTokens = tokenStorage.loadTokens();
-        
-        if (storedTokens) {
-          // Check if access token is expired
-          if (storedTokens.expiresAt < new Date()) {
-            console.log('Stored access token expired, will attempt refresh on first use');
-          }
-          
-          // Authenticate with stored token
-          try {
-            await webSocketManager.adminAuthenticateWithToken(storedTokens.accessToken);
-            console.log('Automatic authentication successful');
-            
-            // CRITICAL: Set global config and token for streaming manager
-            const config = loadConfig();
-            if (config) {
-              (global as any).config = config;
-              (global as any).authToken = storedTokens.idToken;
-              console.log('Global config and authToken set for streaming manager');
-            }
-            
-            // Refresh sessions list after successful authentication
-            try {
-              const sessions = await webSocketManager.listSessions();
-              console.log('Sessions list refreshed after auto-authentication');
-              
-              mainWindow?.webContents.send('admin-auto-authenticated', {
-                username: storedTokens.username,
-                adminId: storedTokens.username,
-                sessions: sessions  // Include refreshed session list
-              });
-            } catch (sessionError: any) {
-              console.log('Failed to refresh sessions after auth:', sessionError.message);
-              // Still send authentication success even if session list fails
-              mainWindow?.webContents.send('admin-auto-authenticated', {
-                username: storedTokens.username,
-                adminId: storedTokens.username
-              });
-            }
-          } catch (authError: any) {
-            console.log('Automatic authentication failed:', authError.message);
-            // Don't throw - user can still manually login
-            // Just notify the UI
-            mainWindow?.webContents.send('admin-auth-required', {
-              reason: authError.message
-            });
-          }
-        }
-      } else {
-        console.log('No stored tokens found - user needs to login');
-        mainWindow?.webContents.send('admin-auth-required', {
-          reason: 'No stored credentials'
-        });
-      }
-    } catch (error: any) {
-      console.error('Error checking stored tokens:', error);
-      // Don't fail the connection if token check fails
+      // NOTE: Authentication removed from here to prevent duplicate authentication
+      // UI layer will handle authentication via auth-manager.js
+      console.log('Connection established, UI layer will handle authentication');
+    } else {
+      console.log('WebSocketManager already connected or connecting, skipping connection attempt');
     }
     
     return { success: true };
@@ -643,7 +657,7 @@ ipcMain.handle('start-local-streaming', async (_, options = {}) => {
     holyrics: config.holyrics,
     tts: config.tts || {
       mode: 'neural',
-      host: 'localhost',
+      host: '127.0.0.1',
       port: 3001
     },
   }, webSocketManager);
@@ -719,49 +733,119 @@ ipcMain.handle('stop-local-streaming', async () => {
 
 ipcMain.handle('start-websocket-server', async () => {
   try {
-    const { exec } = require('child_process');
+    const { spawn } = require('child_process');
     const path = require('path');
+    const fs = require('fs');
+    const os = require('os');
     const config = loadConfig();
     const { port } = getServerConfig(config);
     
-    // Get the websocket server path
-    const serverPath = path.join(__dirname, '../../websocket-server');
+    // Detect platform
+    const isWindows = os.platform() === 'win32';
+    
+    // Get the websocket server path relative to the project root
+    // When compiled, __dirname is dist/capture/src, so we go up to project root
+    const serverPath = path.join(__dirname, '../../../src/websocket-server');
+    
+    // Choose appropriate startup script based on platform
+    const scriptName = isWindows ? 'start.ps1' : 'start.sh';
+    const startScript = path.join(serverPath, scriptName);
+    
+    // Verify the script exists
+    if (!fs.existsSync(startScript)) {
+      console.error(`${scriptName} not found at:`, startScript);
+      return { 
+        success: false, 
+        message: `Server start script not found at: ${startScript}` 
+      };
+    }
+    
+    console.log('Starting WebSocket server using:', startScript);
     
     return new Promise((resolve, reject) => {
-      // Start the WebSocket server
-      const serverProcess = exec('npm start', { 
-        cwd: serverPath,
-        detached: true
-      });
+      // Start the WebSocket server using appropriate command for the platform
+      let serverProcess;
+      
+      if (isWindows) {
+        // Windows: Use PowerShell to run start.ps1
+        serverProcess = spawn('powershell.exe', [
+          '-ExecutionPolicy', 'Bypass',
+          '-File', './start.ps1'
+        ], { 
+          cwd: serverPath,
+          detached: true,
+          stdio: ['ignore', 'pipe', 'pipe']
+        });
+      } else {
+        // macOS/Linux: Use bash to run start.sh
+        serverProcess = spawn('./start.sh', [], { 
+          cwd: serverPath,
+          detached: true,
+          shell: true,
+          stdio: ['ignore', 'pipe', 'pipe']
+        });
+      }
       
       let hasResolved = false;
+      let outputBuffer = '';
       
       serverProcess.stdout.on('data', (data) => {
-        console.log('WebSocket Server:', data);
-        if ((data.includes('running on port') || data.includes('Server running')) && !hasResolved) {
+        const output = data.toString();
+        outputBuffer += output;
+        console.log('WebSocket Server:', output);
+        
+        // Look for success indicators
+        if ((output.includes('running on port') || 
+             output.includes('Server running') ||
+             output.includes('WebSocket Server running')) && !hasResolved) {
           hasResolved = true;
+          // Unref so the parent process can exit
+          serverProcess.unref();
           resolve({ success: true, message: 'Server started successfully' });
         }
       });
       
       serverProcess.stderr.on('data', (data) => {
-        console.error('WebSocket Server Error:', data);
-        if (data.includes('EADDRINUSE') && !hasResolved) {
+        const output = data.toString();
+        outputBuffer += output;
+        console.error('WebSocket Server Error:', output);
+        
+        if (output.includes('EADDRINUSE') && !hasResolved) {
           hasResolved = true;
           resolve({ success: true, message: `Server already running on port ${port}` });
-        } else if (!hasResolved) {
-          hasResolved = true;
-          reject(new Error(data.toString()));
         }
       });
       
-      // Timeout after 10 seconds
+      serverProcess.on('error', (error) => {
+        if (!hasResolved) {
+          hasResolved = true;
+          reject(error);
+        }
+      });
+      
+      serverProcess.on('exit', (code) => {
+        if (!hasResolved) {
+          hasResolved = true;
+          if (code === 0) {
+            resolve({ success: true, message: 'Server started successfully' });
+          } else {
+            reject(new Error(`Server process exited with code ${code}. Output: ${outputBuffer}`));
+          }
+        }
+      });
+      
+      // Timeout after 30 seconds (increased to allow for npm install if needed)
       setTimeout(() => {
         if (!hasResolved) {
           hasResolved = true;
-          resolve({ success: false, message: 'Server start timeout - check manually' });
+          // Server might still be starting, so don't kill it
+          serverProcess.unref();
+          resolve({ 
+            success: true, 
+            message: 'Server is starting (this may take a moment for first run)' 
+          });
         }
-      }, 10000);
+      }, 30000);
     });
   } catch (error) {
     return { success: false, message: (error as Error).message };
@@ -771,6 +855,7 @@ ipcMain.handle('start-websocket-server', async () => {
 ipcMain.handle('stop-websocket-server', async () => {
   try {
     const { exec } = require('child_process');
+    const os = require('os');
     const config = loadConfig();
     const { port } = getServerConfig(config);
     
@@ -804,77 +889,68 @@ ipcMain.handle('stop-websocket-server', async () => {
       disconnected: true
     });
     
+    // Detect platform
+    const isWindows = os.platform() === 'win32';
+    
     return new Promise((resolve) => {
-      // Kill only LISTEN processes on the specified port
-      exec(`lsof -ti:${port} -sTCP:LISTEN | xargs kill -9`, (error, stdout, stderr) => {
-        if (error) {
-          // Process might not be running, which is fine
-          console.log('No server process found on port', port);
-          resolve({ success: true, message: 'Server stopped (was not running)' });
-        } else {
-          console.log('Server process killed on port', port);
-          resolve({ success: true, message: 'Server stopped successfully' });
-        }
-      });
+      if (isWindows) {
+        // Windows: Use netstat and taskkill
+        const command = `netstat -ano | findstr :${port} | findstr LISTENING`;
+        exec(command, (error, stdout, stderr) => {
+          if (error || !stdout) {
+            console.log('No server process found on port', port);
+            resolve({ success: true, message: 'Server stopped (was not running)' });
+            return;
+          }
+          
+          // Extract PID from netstat output (last column)
+          const lines = stdout.trim().split('\n');
+          const pids = new Set<string>();
+          
+          for (const line of lines) {
+            const parts = line.trim().split(/\s+/);
+            const pid = parts[parts.length - 1];
+            if (pid && pid !== '0') {
+              pids.add(pid);
+            }
+          }
+          
+          if (pids.size === 0) {
+            console.log('No server process found on port', port);
+            resolve({ success: true, message: 'Server stopped (was not running)' });
+            return;
+          }
+          
+          // Kill each PID
+          const pidArray = Array.from(pids);
+          exec(`taskkill /F /PID ${pidArray.join(' /PID ')}`, (killError) => {
+            if (killError) {
+              console.error('Error killing process:', killError);
+              resolve({ success: false, message: 'Failed to stop server process' });
+            } else {
+              console.log('Server process killed on port', port);
+              resolve({ success: true, message: 'Server stopped successfully' });
+            }
+          });
+        });
+      } else {
+        // macOS/Linux: Use lsof
+        exec(`lsof -ti:${port} -sTCP:LISTEN | xargs kill -9`, (error, stdout, stderr) => {
+          if (error) {
+            // Process might not be running, which is fine
+            console.log('No server process found on port', port);
+            resolve({ success: true, message: 'Server stopped (was not running)' });
+          } else {
+            console.log('Server process killed on port', port);
+            resolve({ success: true, message: 'Server stopped successfully' });
+          }
+        });
+      }
     });
   } catch (error) {
     return { success: false, message: (error as Error).message };
   }
 });
-
-// Admin token storage helpers
-interface AdminTokenData {
-  token: string;
-  refreshToken: string;
-  tokenExpiry: string;
-  adminId: string;
-  username: string;
-  timestamp: number;
-}
-
-function storeAdminTokensSecurely(data: AdminTokenData): void {
-  if (safeStorage.isEncryptionAvailable()) {
-    const encrypted = safeStorage.encryptString(JSON.stringify({ ...data, timestamp: Date.now() }));
-    const tokenPath = path.join(app.getPath('userData'), 'admin-tokens.dat');
-    fs.writeFileSync(tokenPath, encrypted);
-  }
-}
-
-function loadStoredAdminTokens(): AdminTokenData | null {
-  try {
-    const tokenPath = path.join(app.getPath('userData'), 'admin-tokens.dat');
-    if (!fs.existsSync(tokenPath)) return null;
-    
-    if (safeStorage.isEncryptionAvailable()) {
-      const encrypted = fs.readFileSync(tokenPath);
-      const decrypted = safeStorage.decryptString(encrypted);
-      const data: AdminTokenData = JSON.parse(decrypted);
-      
-      // Check if stored within 4 hours
-      // This ensures refresh tokens are still valid (Cognito refresh tokens valid for 30 days)
-      const withinStorageWindow = Date.now() - data.timestamp < 4 * 60 * 60 * 1000;
-      
-      if (withinStorageWindow) {
-        // Return tokens even if access token expired - refresh token will be used
-        return data;
-      }
-    }
-  } catch (error) {
-    console.error('Failed to load stored admin tokens:', error);
-  }
-  return null;
-}
-
-function clearStoredAdminTokens(): void {
-  try {
-    const tokenPath = path.join(app.getPath('userData'), 'admin-tokens.dat');
-    if (fs.existsSync(tokenPath)) {
-      fs.unlinkSync(tokenPath);
-    }
-  } catch (error) {
-    console.error('Failed to clear stored admin tokens:', error);
-  }
-}
 
 
 // Holyrics control handlers

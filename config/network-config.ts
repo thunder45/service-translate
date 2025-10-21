@@ -86,7 +86,7 @@ class NetworkConfigManager {
       }
     }
 
-    // Last resort: localhost
+    // Last resort: 127.0.0.1
     return '127.0.0.1';
   }
 
