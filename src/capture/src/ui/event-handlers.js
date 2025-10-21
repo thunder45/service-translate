@@ -30,11 +30,15 @@
 
     /**
      * Setup transcription result handlers
+     * Transcriptions are displayed in the Portuguese tab
      */
     function setupTranscriptionHandlers() {
         window.electronAPI.onTranscription((result) => {
-            const content = window.utils.getElement('tab-pt-BR');
-            if (!content) return;
+            const content = window.utils.getElement('translation-pt');
+            if (!content) {
+                console.warn('Portuguese tab not found for transcription display');
+                return;
+            }
 
             if (result.isPartial) {
                 // Update partial result (shown in italics)
@@ -61,8 +65,11 @@
     function setupTranslationHandlers() {
         window.electronAPI.onTranslation((result) => {
             result.translations.forEach(translation => {
-                const tabContent = window.utils.getElement(`tab-${translation.targetLanguage}`);
-                if (!tabContent) return;
+                const tabContent = window.utils.getElement(`translation-${translation.targetLanguage}`);
+                if (!tabContent) {
+                    console.warn(`Translation tab not found: translation-${translation.targetLanguage}`);
+                    return;
+                }
 
                 if (translation.isPartial) {
                     // Update partial translation (shown in italics)
