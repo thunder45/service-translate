@@ -4,9 +4,10 @@
   "description": "Progressive Web Application client for Service Translate TTS",
   "main": "index.html",
   "scripts": {
-    "start": "npx --yes http-server -p 8080",
-    "serve": "npx --yes http-server -p 8080",
-    "start-python": "python3 -m http.server 8080"
+    "start": "node ../../scripts/start-client-pwa.js",
+    "serve": "node ../../scripts/start-client-pwa.js",
+    "start-direct": "npx --yes http-server -p ${PWA_PORT:-8080}",
+    "start-python": "python3 -m http.server ${PWA_PORT:-8080}"
   },
   "keywords": ["pwa", "translation", "tts", "websocket"],
   "author": "Service Translate",

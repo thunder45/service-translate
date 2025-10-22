@@ -29,18 +29,27 @@ echo "Configuring firewall rules for network access..."
 echo "This requires sudo permissions to modify system firewall settings."
 echo ""
 
+# Get configurable ports
+PWA_PORT=${PWA_PORT:-8080}
+WS_PORT=${PORT:-3001}
+
+echo "Configuring firewall for:"
+echo "  PWA Server: port ${PWA_PORT}"
+echo "  WebSocket Server: port ${WS_PORT}"
+echo ""
+
 # Create the anchor rules file
 ANCHOR_FILE="/etc/pf.anchors/service-translate"
-sudo tee "$ANCHOR_FILE" > /dev/null << 'EOF'
-# Service Translate - Allow incoming connections on ports 8080 and 3001
-# Port 8080: PWA web server
-# Port 3001: WebSocket server
+sudo tee "$ANCHOR_FILE" > /dev/null << EOF
+# Service Translate - Allow incoming connections on PWA and WebSocket ports
+# Port ${PWA_PORT}: PWA web server (configurable via PWA_PORT environment variable)
+# Port ${WS_PORT}: WebSocket server (configurable via PORT environment variable)
 
-# Allow TCP traffic on port 8080 (PWA server)
-pass in proto tcp from any to any port 8080
+# Allow TCP traffic on PWA server port
+pass in proto tcp from any to any port ${PWA_PORT}
 
-# Allow TCP traffic on port 3001 (WebSocket server)
-pass in proto tcp from any to any port 3001
+# Allow TCP traffic on WebSocket server port
+pass in proto tcp from any to any port ${WS_PORT}
 EOF
 
 if [ $? -eq 0 ]; then
@@ -111,7 +120,7 @@ else
     fi
 fi
 
-echo "✅ Firewall configured to allow ports 8080 and 3001"
+echo "✅ Firewall configured to allow ports ${PWA_PORT} and ${WS_PORT}"
 
 # Install capture app dependencies
 echo ""

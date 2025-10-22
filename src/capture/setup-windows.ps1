@@ -126,6 +126,15 @@ Write-Host "Configuring Windows Firewall rules for network access..." -Foregroun
 Write-Host "This requires Administrator privileges to modify firewall settings." -ForegroundColor Yellow
 Write-Host ""
 
+# Get configurable ports
+$PWA_PORT = if ($env:PWA_PORT) { $env:PWA_PORT } else { "8080" }
+$WS_PORT = if ($env:PORT) { $env:PORT } else { "3001" }
+
+Write-Host "Configuring firewall for:" -ForegroundColor Green
+Write-Host "  PWA Server: port $PWA_PORT" -ForegroundColor White
+Write-Host "  WebSocket Server: port $WS_PORT" -ForegroundColor White
+Write-Host ""
+
 if (-not $isAdmin) {
     Write-Host "WARNING: Not running as Administrator - skipping firewall configuration" -ForegroundColor Yellow
     Write-Host "To configure firewall manually, run this script as Administrator or see docs/WINDOWS_FIREWALL_SETUP.md" -ForegroundColor Yellow
@@ -133,17 +142,17 @@ if (-not $isAdmin) {
     try {
         # Remove existing rules if they exist (to avoid duplicates)
         Write-Host "Removing existing firewall rules (if any)..." -ForegroundColor Gray
-        netsh advfirewall firewall delete rule name="Service Translate - PWA Server (TCP 8080)" 2>$null | Out-Null
-        netsh advfirewall firewall delete rule name="Service Translate - WebSocket Server (TCP 3001)" 2>$null | Out-Null
+        netsh advfirewall firewall delete rule name="Service Translate - PWA Server*" 2>$null | Out-Null
+        netsh advfirewall firewall delete rule name="Service Translate - WebSocket Server*" 2>$null | Out-Null
         
-        # Add rule for PWA server (port 8080)
-        Write-Host "Adding firewall rule for PWA server (port 8080)..." -ForegroundColor Gray
+        # Add rule for PWA server (configurable port)
+        Write-Host "Adding firewall rule for PWA server (port $PWA_PORT)..." -ForegroundColor Gray
         $result = netsh advfirewall firewall add rule `
-            name="Service Translate - PWA Server (TCP 8080)" `
+            name="Service Translate - PWA Server (TCP $PWA_PORT)" `
             dir=in `
             action=allow `
             protocol=TCP `
-            localport=8080 `
+            localport=$PWA_PORT `
             profile=private `
             description="Allow incoming connections to Service Translate PWA web server"
         
@@ -151,14 +160,14 @@ if (-not $isAdmin) {
             throw "Failed to add PWA server firewall rule"
         }
         
-        # Add rule for WebSocket server (port 3001)
-        Write-Host "Adding firewall rule for WebSocket server (port 3001)..." -ForegroundColor Gray
+        # Add rule for WebSocket server (configurable port)
+        Write-Host "Adding firewall rule for WebSocket server (port $WS_PORT)..." -ForegroundColor Gray
         $result = netsh advfirewall firewall add rule `
-            name="Service Translate - WebSocket Server (TCP 3001)" `
+            name="Service Translate - WebSocket Server (TCP $WS_PORT)" `
             dir=in `
             action=allow `
             protocol=TCP `
-            localport=3001 `
+            localport=$WS_PORT `
             profile=private `
             description="Allow incoming connections to Service Translate WebSocket server"
         
@@ -167,8 +176,8 @@ if (-not $isAdmin) {
         }
         
         Write-Host "Firewall rules configured successfully" -ForegroundColor Green
-        Write-Host "  - Port 8080: PWA web server" -ForegroundColor White
-        Write-Host "  - Port 3001: WebSocket server" -ForegroundColor White
+        Write-Host "  - Port $PWA_PORT: PWA web server" -ForegroundColor White
+        Write-Host "  - Port $WS_PORT: WebSocket server" -ForegroundColor White
         Write-Host ""
         Write-Host "Note: Rules are applied to 'Private' network profile only" -ForegroundColor Yellow
         Write-Host "If connecting from other devices doesn't work, ensure your network is set to 'Private'" -ForegroundColor Yellow
