@@ -66,9 +66,9 @@ try {
     #exit 1
 }
 
-# Install Node.js dependencies
+# Install capture app dependencies
 Write-Host ""
-Write-Host "Installing Node.js dependencies..." -ForegroundColor Green
+Write-Host "Installing capture app dependencies..." -ForegroundColor Green
 
 try {
     npm install
@@ -77,9 +77,29 @@ try {
         throw "npm install failed with exit code $LASTEXITCODE"
     }
     
-    Write-Host "Dependencies installed successfully" -ForegroundColor Green
+    Write-Host "Capture app dependencies installed successfully" -ForegroundColor Green
 } catch {
-    Write-Host "Failed to install Node.js dependencies: $_" -ForegroundColor Red
+    Write-Host "Failed to install capture app dependencies: $_" -ForegroundColor Red
+    exit 1
+}
+
+# Install client-pwa dependencies
+Write-Host ""
+Write-Host "Installing client-pwa dependencies..." -ForegroundColor Green
+
+try {
+    Set-Location "../client-pwa"
+    npm install
+    
+    if ($LASTEXITCODE -ne 0) {
+        throw "client-pwa npm install failed with exit code $LASTEXITCODE"
+    }
+    
+    Write-Host "Client PWA dependencies installed successfully" -ForegroundColor Green
+    Set-Location "../capture"
+} catch {
+    Write-Host "Failed to install client-pwa dependencies: $_" -ForegroundColor Red
+    Set-Location "../capture"
     exit 1
 }
 
@@ -163,8 +183,11 @@ if (-not $isAdmin) {
 Write-Host ""
 Write-Host "Setup complete!" -ForegroundColor Green
 Write-Host ""
-Write-Host "To run the application:" -ForegroundColor Cyan
+Write-Host "To run the capture app:" -ForegroundColor Cyan
 Write-Host "  npm run dev" -ForegroundColor White
+Write-Host ""
+Write-Host "To start the PWA client server:" -ForegroundColor Cyan
+Write-Host "  cd ../client-pwa && npm start" -ForegroundColor White
 Write-Host ""
 Write-Host "Note: Make sure to configure AWS credentials before running" -ForegroundColor Yellow
 Write-Host "  See: ADMIN_AUTHENTICATION_GUIDE.md" -ForegroundColor Yellow

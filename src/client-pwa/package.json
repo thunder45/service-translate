@@ -4,14 +4,16 @@
   "description": "Progressive Web Application client for Service Translate TTS",
   "main": "index.html",
   "scripts": {
-    "start": "python3 -m http.server 8080",
-    "serve": "python3 -m http.server 8080"
+    "start": "npx --yes http-server -p 8080",
+    "serve": "npx --yes http-server -p 8080",
+    "start-python": "python3 -m http.server 8080"
   },
   "keywords": ["pwa", "translation", "tts", "websocket"],
   "author": "Service Translate",
   "license": "MIT",
   "dependencies": {
-    "socket.io-client": "^4.7.2"
+    "socket.io-client": "^4.7.2",
+    "http-server": "^14.1.1"
   },
   "devDependencies": {}
 }

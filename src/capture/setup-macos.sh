@@ -113,13 +113,24 @@ fi
 
 echo "✅ Firewall configured to allow ports 8080 and 3001"
 
-# Install dependencies
+# Install capture app dependencies
 echo ""
-echo "Installing dependencies..."
+echo "Installing capture app dependencies..."
 npm install
+
+# Install client-pwa dependencies
+echo ""
+echo "Installing client-pwa dependencies..."
+cd ../client-pwa
+npm install
+echo "✅ Client PWA dependencies installed"
+cd ../capture
 
 echo ""
 echo "✅ Setup complete!"
 echo ""
-echo "To run the app:"
+echo "To run the capture app:"
 echo "  npm run dev"
+echo ""
+echo "To start the PWA client server:"
+echo "  cd ../client-pwa && npm start"
