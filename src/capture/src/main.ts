@@ -239,6 +239,18 @@ ipcMain.handle('admin-authenticate', async (_, credentials: { username: string; 
     (global as any).config = config;
     (global as any).authToken = tokens.idToken; // Identity Pool requires ID token
     
+    // DEBUG: Log ID token for analysis
+    console.log('🔍 [DEBUG] ID Token for analysis:');
+    console.log('Length:', tokens.idToken?.length || 0);
+    console.log('Full ID Token:', tokens.idToken);
+    console.log('🔍 [DEBUG] End ID Token');
+    
+    // DEBUG: Log Access token for analysis
+    console.log('🔍 [DEBUG] Access Token for analysis:');
+    console.log('Length:', tokens.accessToken?.length || 0);
+    console.log('Full Access Token:', tokens.accessToken);
+    console.log('🔍 [DEBUG] End Access Token');
+
     // Store tokens in SecureTokenStorage for WebSocket reconnection
     // This must happen even if WebSocket is not connected yet
     const { SecureTokenStorage } = require('./secure-token-storage');
@@ -258,7 +270,8 @@ ipcMain.handle('admin-authenticate', async (_, credentials: { username: string; 
     return {
       success: true,
       username: credentials.username,
-      token: tokens.accessToken,
+      accessToken: tokens.accessToken,
+      idToken: tokens.idToken,
       refreshToken: tokens.refreshToken,
       tokenExpiry: expiresAt.getTime(),
       adminId: credentials.username
@@ -283,15 +296,15 @@ ipcMain.handle('admin-authenticate-with-token', async (_, data: { token: string 
   }
 });
 
-ipcMain.handle('store-admin-tokens', async (_, data: { token: string; refreshToken: string; tokenExpiry: any; adminId?: string; username: string }) => {
+ipcMain.handle('store-admin-tokens', async (_, data: { accessToken: string; idToken: string; refreshToken: string; tokenExpiry: any; adminId?: string; username: string }) => {
   try {
     const { SecureTokenStorage } = require('./secure-token-storage');
     const tokenStorage = new SecureTokenStorage(app.getPath('userData'));
     
     const expiresAt = data.tokenExpiry ? new Date(data.tokenExpiry) : new Date(Date.now() + 3600 * 1000);
     tokenStorage.storeTokens({
-      accessToken: data.token,
-      idToken: data.token, // Use access token as ID token for now
+      accessToken: data.accessToken,
+      idToken: data.idToken,
       refreshToken: data.refreshToken,
       expiresAt,
       username: data.username
@@ -313,7 +326,8 @@ ipcMain.handle('load-stored-admin-tokens', async () => {
       const tokens = tokenStorage.loadTokens();
       if (tokens) {
         return {
-          token: tokens.accessToken,
+          accessToken: tokens.accessToken,
+          idToken: tokens.idToken,
           refreshToken: tokens.refreshToken,
           tokenExpiry: tokens.expiresAt.toISOString(),
           adminId: tokens.username,
@@ -413,6 +427,13 @@ ipcMain.handle('connect-websocket', async () => {
           // These are required by start-local-streaming handler
           (global as any).config = config;
           (global as any).authToken = storedTokens.idToken; // Identity Pool requires ID token
+          
+          // DEBUG: Log stored ID token for analysis
+          console.log('🔍 [DEBUG] Stored ID Token for analysis:');
+          console.log('Length:', storedTokens.idToken?.length || 0);
+          console.log('Full Stored ID Token:', storedTokens.idToken);
+          console.log('🔍 [DEBUG] End Stored ID Token');
+          
           console.log('Global config and auth token set from stored tokens');
         } else {
           // Tokens were expired and cleared by loadTokens
@@ -657,10 +678,55 @@ ipcMain.handle('start-local-streaming', async (_, options = {}) => {
   }
   
   const config = (global as any).config;
-  const token = (global as any).authToken;
+  let token = (global as any).authToken;
   
   if (!config || !token) {
     throw new Error('Configuration or authentication not found. Please login first.');
+  }
+
+  // Check if ID token needs refreshing for AWS services
+  const { SecureTokenStorage } = require('./secure-token-storage');
+  const tokenStorage = new SecureTokenStorage(app.getPath('userData'));
+  
+  try {
+    // Check if tokens are expired or will expire soon
+    if (tokenStorage.willExpireSoon(5)) { // 5 minutes
+      console.log('ID token expired or expiring soon, refreshing for AWS services...');
+      
+      const storedTokens = tokenStorage.loadTokens();
+      if (storedTokens?.refreshToken) {
+        // Initialize CognitoAuth for token refresh
+        if (!cognitoAuth) {
+          cognitoAuth = new CognitoAuth({
+            userPoolId: config.userPoolId,
+            clientId: config.clientId,
+            region: config.region,
+          });
+        }
+        
+        // Refresh tokens
+        const refreshedTokens = await cognitoAuth.refreshToken(storedTokens.refreshToken);
+        
+        // Update stored tokens
+        const newExpiresAt = new Date(Date.now() + refreshedTokens.expiresIn * 1000);
+        tokenStorage.storeTokens({
+          accessToken: refreshedTokens.accessToken,
+          idToken: refreshedTokens.idToken,
+          refreshToken: storedTokens.refreshToken, // Refresh token stays the same
+          expiresAt: newExpiresAt,
+          username: storedTokens.username
+        });
+        
+        // Update global token for AWS services
+        (global as any).authToken = refreshedTokens.idToken;
+        token = refreshedTokens.idToken;
+        
+        console.log('Tokens refreshed successfully for AWS services');
+      }
+    }
+  } catch (error) {
+    console.warn('Token refresh failed, using existing token:', error);
+    // Continue with existing token - might still work
   }
   
   streamingManager = new DirectStreamingManager({

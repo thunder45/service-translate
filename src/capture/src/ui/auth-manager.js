@@ -16,9 +16,10 @@
         isAuthenticated: false,
         adminId: null,
         username: null,
-        token: null,
+        accessToken: null,
+        idToken: null,
         refreshToken: null,
-        tokenExpire: null,
+        tokenExpiry: null,
         tokenRefreshTimer: null,
         expiryWarningTimer: null
     };
@@ -53,7 +54,8 @@
                     isAuthenticated: true,
                     adminId: result.adminId,
                     username: result.username,
-                    token: result.token,
+                    accessToken: result.accessToken,
+                    idToken: result.idToken,
                     refreshToken: result.refreshToken,
                     tokenExpiry: result.tokenExpiry ? new Date(result.tokenExpiry) : null,
                     tokenRefreshTimer: null,
@@ -83,7 +85,7 @@
                         if (connectResult.success) {
                             await new Promise(resolve => setTimeout(resolve, 500));
                             const wsAuthResult = await window.electronAPI.adminAuthenticateWithToken({ 
-                                token: result.token 
+                                token: result.accessToken 
                             });
                             
                             if (wsAuthResult.success) {
@@ -107,7 +109,7 @@
                 }, 100);
 
                 // Store tokens securely
-                await storeAdminTokens(result.token, result.refreshToken, result.tokenExpiry);
+                await storeAdminTokens(result.accessToken, result.idToken, result.refreshToken, result.tokenExpiry);
 
             } else {
                 showLoginStatus(result.error || 'Authentication failed', 'error');
@@ -152,7 +154,8 @@
                 isAuthenticated: false,
                 adminId: null,
                 username: null,
-                token: null,
+                accessToken: null,
+                idToken: null,
                 refreshToken: null,
                 tokenExpiry: null,
                 tokenRefreshTimer: null,
@@ -202,20 +205,22 @@
             });
 
             if (result.success) {
-                // Update tokens
-                adminAuthState.token = result.token;
+                // Update tokens (refresh returns new access and ID tokens)
+                adminAuthState.accessToken = result.accessToken;
+                adminAuthState.idToken = result.idToken;
                 adminAuthState.refreshToken = result.refreshToken || adminAuthState.refreshToken;
                 adminAuthState.tokenExpiry = result.tokenExpiry ? new Date(result.tokenExpiry) : null;
 
                 // Update global auth result
                 if (window.adminAuthResult) {
-                    window.adminAuthResult.token = result.token;
+                    window.adminAuthResult.accessToken = result.accessToken;
+                    window.adminAuthResult.idToken = result.idToken;
                     window.adminAuthResult.refreshToken = result.refreshToken || adminAuthState.refreshToken;
                     window.adminAuthResult.tokenExpiry = result.tokenExpiry;
                 }
 
-                // Store new tokens
-                await storeAdminTokens(result.token, adminAuthState.refreshToken, result.tokenExpiry);
+                // Store refreshed tokens
+                await storeAdminTokens(result.accessToken, result.idToken, adminAuthState.refreshToken, result.tokenExpiry);
 
                 // Reset timers
                 setupTokenManagement();
@@ -303,10 +308,11 @@
     /**
      * Store admin tokens securely
      */
-    async function storeAdminTokens(token, refreshToken, tokenExpiry) {
+    async function storeAdminTokens(accessToken, idToken, refreshToken, tokenExpiry) {
         try {
             await window.electronAPI.storeAdminTokens({
-                token,
+                accessToken,
+                idToken,
                 refreshToken,
                 tokenExpiry,
                 adminId: adminAuthState.adminId,
@@ -335,7 +341,7 @@
         try {
             const stored = await window.electronAPI.loadStoredAdminTokens();
             
-            if (stored && stored.token && stored.refreshToken) {
+            if (stored && stored.accessToken && stored.refreshToken) {
                 console.log('✓ Found stored tokens for:', stored.username);
 
                 const expiry = stored.tokenExpiry ? new Date(stored.tokenExpiry) : null;
@@ -345,7 +351,8 @@
                     isAuthenticated: true,
                     adminId: stored.adminId,
                     username: stored.username,
-                    token: stored.token,
+                    accessToken: stored.accessToken,
+                    idToken: stored.idToken,
                     refreshToken: stored.refreshToken,
                     tokenExpiry: expiry,
                     tokenRefreshTimer: null,
@@ -357,7 +364,8 @@
                 window.adminAuthResult = {
                     success: true,
                     username: stored.username,
-                    token: stored.token,
+                    accessToken: stored.accessToken,
+                    idToken: stored.idToken,
                     refreshToken: stored.refreshToken,
                     tokenExpiry: expiry ? expiry.getTime() : null,
                     adminId: stored.adminId
@@ -374,9 +382,9 @@
                 // Show status
                 window.uiManager.showStatus(`✅ Reconnected as ${stored.username}`, 'success');
 
-                // Start WebSocket connection flow
+                // Start WebSocket connection flow (use access token for WebSocket auth)
                 if (window.websocketManager) {
-                    await connectAndAuthenticate(stored.token);
+                    await connectAndAuthenticate(stored.accessToken);
                 }
 
                 return true;
@@ -393,18 +401,18 @@
      * Used for both startup (with stored tokens) and manual reconnection
      * Uses existing checkWebSocketServerStatus() - does not reimplement health check
      * 
-     * @param {string} token - Optional token, if not provided will use current auth state
+     * @param {string} accessToken - Optional access token for WebSocket auth, if not provided will use current auth state
      */
-    async function connectAndAuthenticate(token) {
+    async function connectAndAuthenticate(accessToken) {
         try {
-            // If no token provided, get it from current auth state
-            if (!token) {
-                if (!adminAuthState.token) {
-                    console.error('No token available for authentication');
+            // If no access token provided, get it from current auth state
+            if (!accessToken) {
+                if (!adminAuthState.accessToken) {
+                    console.error('No access token available for WebSocket authentication');
                     window.uiManager.showStatus('⚠️ Please login first', 'warning');
                     return;
                 }
-                token = adminAuthState.token;
+                accessToken = adminAuthState.accessToken;
             }
 
             window.uiManager.showStatus('Connecting to WebSocket server...', 'info');
@@ -432,10 +440,10 @@
             // Wait for connection to establish
             await new Promise(resolve => setTimeout(resolve, 1000));
 
-            // Authenticate once
-            console.log('Authenticating with token...');
+            // Authenticate with access token for WebSocket server
+            console.log('Authenticating with access token...');
             const wsAuthResult = await window.electronAPI.adminAuthenticateWithToken({ 
-                token: token 
+                token: accessToken  // WebSocket server expects access token
             });
 
             if (wsAuthResult.success) {
