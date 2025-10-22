@@ -270,7 +270,7 @@ const messageRouter = new MessageRouter(
   pollyService
 );
 
-const PORT = parseInt(process.env.PORT || '3001', 10);
+const WS_PORT = parseInt(process.env.WS_PORT || '3001', 10);
 
 // Audio file serving endpoint
 app.get('/audio/:filename', (req, res) => {
@@ -622,9 +622,9 @@ io.on('connection', async (socket) => {
 });
 
 // Start server
-server.listen(PORT, () => {
-  console.log(`Service Translate WebSocket Server running on port ${PORT}`);
-  console.log(`Health check available at http://localhost:${PORT}/health`);
+server.listen(WS_PORT, () => {
+  console.log(`Service Translate WebSocket Server running on port ${WS_PORT}`);
+  console.log(`Health check available at http://localhost:${WS_PORT}/health`);
   
   // Broadcast server restart notification to all connected clients
   // This forces clients to re-authenticate since all tokens were cleared on restart

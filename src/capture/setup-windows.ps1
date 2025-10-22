@@ -128,7 +128,7 @@ Write-Host ""
 
 # Get configurable ports
 $PWA_PORT = if ($env:PWA_PORT) { $env:PWA_PORT } else { "8080" }
-$WS_PORT = if ($env:PORT) { $env:PORT } else { "3001" }
+$WS_PORT = if ($env:WS_PORT) { $env:WS_PORT } else { "3001" }
 
 Write-Host "Configuring firewall for:" -ForegroundColor Green
 Write-Host "  PWA Server: port $PWA_PORT" -ForegroundColor White

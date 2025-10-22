@@ -31,7 +31,7 @@ echo ""
 
 # Get configurable ports
 PWA_PORT=${PWA_PORT:-8080}
-WS_PORT=${PORT:-3001}
+WS_PORT=${WS_PORT:-3001}
 
 echo "Configuring firewall for:"
 echo "  PWA Server: port ${PWA_PORT}"
@@ -43,7 +43,7 @@ ANCHOR_FILE="/etc/pf.anchors/service-translate"
 sudo tee "$ANCHOR_FILE" > /dev/null << EOF
 # Service Translate - Allow incoming connections on PWA and WebSocket ports
 # Port ${PWA_PORT}: PWA web server (configurable via PWA_PORT environment variable)
-# Port ${WS_PORT}: WebSocket server (configurable via PORT environment variable)
+# Port ${WS_PORT}: WebSocket server (configurable via WS_PORT environment variable)
 
 # Allow TCP traffic on PWA server port
 pass in proto tcp from any to any port ${PWA_PORT}
