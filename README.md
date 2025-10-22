@@ -43,22 +43,22 @@ Admin Computer                    External Host (Optional)
             │ WebSocket + HTTP (/audio/)     │
             │                                │
             └────────────────┬───────────────┘
-                            ▼
-┌───────────────────────────────────────────────┐
-│              Client Devices (WiFi)            │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
-│  │ Phone/PWA   │  │ Tablet/PWA  │  │ Laptop/PWA  │
-│  │ Web Browser │  │ Web Browser │  │ Web Browser │
-│  │             │  │             │  │             │
-│  │ • Loads PWA │  │ • Loads PWA │  │ • Loads PWA │
-│  │   from :8080│  │   from :8080│  │   from :8080│
-│  │ • WebSocket │  │ • WebSocket │  │ • WebSocket │
-│  │   to :3001  │  │   to :3001  │  │   to :3001  │
-│  │ • Audio via │  │ • Audio via │  │ • Audio via │
-│  │   :3001/audio │  │   :3001/audio│  │   :3001/audio │
-│  │ • Local TTS │  │ • Local TTS │  │ • Local TTS │
-│  │   fallback  │  │   fallback  │  │   fallback  │
-│  └─────────────┘  └─────────────┘  └─────────────┘
+                             ▼
+┌───────────────────────────────────────────────────────┐
+│              Client Devices (WiFi)                    │
+│  ┌───────────────┐  ┌───────────────┐  ┌───────────────┐
+│  │ Phone/PWA     │  │ Tablet/PWA    │  │ Laptop/PWA    │
+│  │ Web Browser   │  │ Web Browser   │  │ Web Browser   │
+│  │               │  │               │  │               │
+│  │ • Loads PWA   │  │ • Loads PWA   │  │ • Loads PWA   │
+│  │   from :8080  │  │   from :8080  │  │   from :8080  │
+│  │ • WebSocket   │  │ • WebSocket   │  │ • WebSocket   │
+│  │   to :3001    │  │   to :3001    │  │   to :3001    │
+│  │ • Audio via   │  │ • Audio via   │  │ • Audio via   │
+│  │   :3001/audio │  │   :3001/audio │  │   :3001/audio │
+│  │ • Local TTS   │  │ • Local TTS   │  │ • Local TTS   │
+│  │   fallback    │  │   fallback    │  │   fallback    │
+│  └───────────────┘  └───────────────┘  └───────────────┘
 └───────────────────────────────────────────────────────┘
 ```
 
@@ -77,7 +77,7 @@ Admin Computer                    External Host (Optional)
 - Start/stop streaming without affecting session state
 - Create/end sessions without affecting streaming
 - Manual session selection from active sessions list (no auto-reconnect)
-- See [SESSION_STREAMING_SEPARATION.md](SESSION_STREAMING_SEPARATION.md) for detailed architecture
+- See [docs/SESSION_STREAMING_SEPARATION.md](SESSION_STREAMING_SEPARATION.md) for detailed architecture
 
 **Valid State Combinations:**
 - ❌ No Streaming + ❌ No Session: Initial state
@@ -112,30 +112,54 @@ Admin Computer                    External Host (Optional)
 
 ```
 src/
-├── backend/              # Minimal AWS infrastructure (auth only) ✅
+├── backend/              # AWS infrastructure (Cognito auth) ✅
 │   ├── cdk/             # CDK stack for Cognito setup
-│   └── lambdas/handlers/ # WebSocket Lambda functions
+│   │   ├── app.ts       # CDK application entry point
+│   │   ├── stack.ts     # Main infrastructure stack
+│   │   └── simplified-stack.ts # Minimal auth-only stack
+│   ├── lambdas/         # WebSocket Lambda functions
+│   │   ├── handlers/    # Lambda function handlers
+│   │   └── websocket-helper.ts # Shared WebSocket utilities
+│   ├── AUTH-MANAGEMENT.md # Authentication setup guide
+│   └── package.json
 ├── capture/              # Cross-platform Electron application ✅
-│   ├── src/             # TypeScript source
+│   ├── src/             # TypeScript source code
 │   │   ├── main.ts      # Electron main process
+│   │   ├── auth.ts      # Cognito authentication client
 │   │   ├── audio-capture.ts # Cross-platform audio capture
-│   │   ├── direct-streaming-manager.ts # Transcribe + Translate orchestration
+│   │   ├── direct-streaming-manager.ts # AWS services orchestration
+│   │   ├── direct-transcribe-client.ts # AWS Transcribe streaming
 │   │   ├── websocket-manager.ts # WebSocket client for TTS server
-│   │   ├── cost-tracker.ts # Real-time cost monitoring
+│   │   ├── translation-service.ts # AWS Translate integration
+│   │   ├── secure-token-storage.ts # Encrypted token management
 │   │   ├── holyrics-integration.ts # Holyrics API integration
-│   │   └── monitoring-dashboard.ts # Performance monitoring
-│   ├── setup-macos.sh   # macOS setup script
-│   ├── setup-windows.ps1 # Windows setup script
+│   │   ├── cost-tracker.ts # Real-time cost monitoring
+│   │   ├── monitoring-dashboard.ts # Performance monitoring
+│   │   └── ui/          # UI modules (auth-manager.js, etc.)
+│   ├── index.html       # Electron renderer HTML
+│   ├── preload.js       # Electron preload script
+│   ├── setup-macos.sh   # macOS setup script (configurable ports)
+│   ├── setup-windows.ps1 # Windows setup script (configurable ports)
 │   └── package.json
 ├── websocket-server/     # TTS Server with WebSocket ✅
-│   ├── src/             # TypeScript source
+│   ├── src/             # TypeScript source code
 │   │   ├── server.ts    # Main server with Socket.IO
 │   │   ├── cognito-auth.ts # Cognito authentication service
+│   │   ├── admin-identity-manager.ts # Admin session management
+│   │   ├── message-router.ts # WebSocket message routing
 │   │   ├── polly-service.ts # AWS Polly TTS integration
 │   │   ├── session-manager.ts # Session lifecycle management
 │   │   ├── audio-manager.ts # Audio file management and serving
 │   │   ├── security-middleware.ts # Authentication and rate limiting
-│   │   └── analytics-manager.ts # Usage analytics and monitoring
+│   │   └── token-store.ts # In-memory token management
+│   ├── admin-identities/ # Persistent admin identity storage
+│   ├── audio-cache/     # Generated TTS audio files
+│   ├── sessions/        # Session persistence
+│   ├── logs/            # Server logs and monitoring
+│   ├── start.sh         # Unix startup script (WS_PORT configurable)
+│   ├── start.ps1        # Windows startup script (WS_PORT configurable)
+│   ├── COGNITO_SETUP.md # Cognito configuration guide
+│   ├── MESSAGE_PROTOCOLS.md # WebSocket API documentation
 │   ├── .env.example     # Environment configuration template
 │   └── package.json
 ├── client-pwa/           # Progressive Web Application ✅
@@ -143,14 +167,26 @@ src/
 │   ├── sw.js            # Service Worker for offline support
 │   ├── performance-manager.js # Performance optimizations
 │   ├── user-analytics.js # Client-side analytics
+│   ├── lazy-loader.js   # Dynamic loading optimizations
 │   ├── manifest.json    # PWA manifest
+│   ├── icons/           # PWA icons (16x16, 32x32, 144x144)
 │   └── package.json
 ├── shared/               # Shared TypeScript types ✅
-│   └── types.ts         # Comprehensive type definitions
-└── config/               # Configuration management ✅
+│   ├── types.ts         # Comprehensive type definitions
+│   └── types.js         # Compiled JavaScript types
+└── config/               # Configuration management (unused) ⚠️
     ├── aws-setup.ts     # AWS service configuration
     ├── environment.ts   # Environment-specific settings
     └── network-config.ts # Network and security configuration
+```
+
+**Key Directories Created at Runtime:**
+- `websocket-server/admin-identities/` - Admin identity persistence
+- `websocket-server/sessions/` - Session state storage
+- `websocket-server/audio-cache/` - Generated TTS audio files
+- `websocket-server/logs/` - Server logs and performance metrics
+- `~/Library/Application Support/service-translate-capture/` - Client token storage (macOS)
+- `%APPDATA%/service-translate-capture/` - Client token storage (Windows)
 ```
 
 ## 🚀 Quick Start
