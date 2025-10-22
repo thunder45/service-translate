@@ -482,6 +482,12 @@ io.on('connection', async (socket) => {
     messageRouter.routeMessage(socket, 'token-refresh', data);
   }));
 
+  // Token update message handler (for AWS service credentials)
+  socket.on('token-update', secureMessageHandler('token-update', (data) => {
+    console.log(`[${socket.id}] ← token-update`);
+    messageRouter.routeMessage(socket, 'token-update', data);
+  }));
+
   // Admin session access message handler
   socket.on('admin-session-access', secureMessageHandler('admin-session-access', (data) => {
     console.log(`[${socket.id}] ← admin-session-access:`, JSON.stringify(data, null, 2));

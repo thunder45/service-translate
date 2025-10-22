@@ -222,6 +222,18 @@
                 // Store refreshed tokens
                 await storeAdminTokens(result.accessToken, result.idToken, adminAuthState.refreshToken, result.tokenExpiry);
 
+                // Update WebSocket server with new ID token for AWS services
+                try {
+                    console.log('Updating WebSocket server with refreshed ID token...');
+                    await window.electronAPI.updateServerCredentials({
+                        idToken: result.idToken
+                    });
+                    console.log('WebSocket server credentials updated successfully');
+                } catch (serverUpdateError) {
+                    console.error('Failed to update server credentials:', serverUpdateError);
+                    // Don't fail the entire refresh process - server will handle expired tokens
+                }
+
                 // Reset timers
                 setupTokenManagement();
 

@@ -60,6 +60,9 @@ export class MessageRouter {
         case 'token-refresh':
           this.handleTokenRefresh(socket, data);
           break;
+        case 'token-update':
+          this.handleTokenUpdate(socket, data);
+          break;
         case 'admin-session-access':
           this.handleAdminSessionAccess(socket, data);
           break;
@@ -264,6 +267,12 @@ export class MessageRouter {
         permissions,
         timestamp: new Date().toISOString()
       };
+
+      // Update AWS service credentials with ID token (if available from credentials auth)
+      if ('cognitoTokens' in result && result.cognitoTokens && this.pollyService) {
+        console.log(`Updating AWS service credentials for admin ${result.adminId}`);
+        this.pollyService.updateCredentials(result.cognitoTokens.idToken);
+      }
 
       socket.emit('admin-auth-response', response);
 
@@ -498,6 +507,65 @@ export class MessageRouter {
       console.error('Token refresh error:', error);
       this.sendAdminError(socket, AdminErrorCode.SYSTEM_INTERNAL_ERROR, {
         operation: 'token-refresh'
+      });
+    }
+  }
+
+  /**
+   * Handle token update for AWS services (admin only)
+   * Receives new ID token from client and updates AWS service credentials
+   */
+  private async handleTokenUpdate(socket: Socket, data: any): Promise<void> {
+    console.log(`Token update request from ${socket.id}`);
+
+    try {
+      // Validate admin authentication
+      const adminIdentity = this.adminIdentityManager.getAdminBySocketId(socket.id);
+      if (!adminIdentity) {
+        this.sendAdminError(socket, AdminErrorCode.AUTH_SESSION_NOT_FOUND, {
+          operation: 'token-update'
+        });
+        return;
+      }
+
+      // Validate required fields
+      if (!data.idToken) {
+        this.sendAdminError(socket, AdminErrorCode.VALIDATION_MISSING_REQUIRED_FIELD, {
+          operation: 'token-update',
+          validationErrors: ['idToken is required']
+        });
+        return;
+      }
+
+      try {
+        // Update AWS service credentials with new ID token
+        if (this.pollyService && this.pollyService.updateCredentials) {
+          console.log(`Updating PollyService credentials for admin ${adminIdentity.adminId}`);
+          this.pollyService.updateCredentials(data.idToken);
+        }
+
+        // Update other AWS services that might use ID tokens
+        // (Add more services here as needed)
+
+        // Send success response
+        socket.emit('token-update-response', {
+          type: 'token-update-response',
+          success: true,
+          timestamp: new Date().toISOString()
+        });
+
+        console.log(`AWS service credentials updated successfully for admin ${adminIdentity.adminId}`);
+      } catch (error) {
+        console.error('AWS credentials update failed:', error);
+        this.sendAdminError(socket, AdminErrorCode.SYSTEM_INTERNAL_ERROR, {
+          operation: 'token-update',
+          validationErrors: ['Failed to update AWS service credentials']
+        });
+      }
+    } catch (error) {
+      console.error('Token update error:', error);
+      this.sendAdminError(socket, AdminErrorCode.SYSTEM_INTERNAL_ERROR, {
+        operation: 'token-update'
       });
     }
   }

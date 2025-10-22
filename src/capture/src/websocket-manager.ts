@@ -977,4 +977,36 @@ export class WebSocketManager extends EventEmitter {
       }
     }
   }
+
+  /**
+   * Update server credentials with new ID token for AWS services
+   * Called when client tokens are refreshed
+   */
+  async updateServerCredentials(idToken: string): Promise<any> {
+    if (!this.isConnected || !this.socket) {
+      throw new Error('Not connected to WebSocket server');
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Server credentials update timeout'));
+      }, 10000);
+
+      this.socket!.once('token-update-response', (response: any) => {
+        clearTimeout(timeout);
+        
+        if (response.success) {
+          console.log('Server credentials updated successfully');
+          resolve(response);
+        } else {
+          reject(new Error(response.error || 'Server credentials update failed'));
+        }
+      });
+
+      this.socket!.emit('token-update', {
+        type: 'token-update',
+        idToken
+      });
+    });
+  }
 }

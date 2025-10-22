@@ -368,6 +368,21 @@ ipcMain.handle('refresh-admin-token', async (_, data: { refreshToken: string; ad
   }
 });
 
+ipcMain.handle('update-server-credentials', async (_, data: { idToken: string }) => {
+  try {
+    if (!webSocketManager) {
+      throw new Error('WebSocket manager not initialized. Please connect to server first.');
+    }
+
+    // Send new ID token to WebSocket server for AWS service authentication
+    const result = await webSocketManager.updateServerCredentials(data.idToken);
+    return result;
+  } catch (error: any) {
+    console.error('Server credentials update error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 
 ipcMain.handle('change-password', async (_, credentials) => {
   if (!cognitoAuth) {
