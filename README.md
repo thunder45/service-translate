@@ -30,41 +30,34 @@ Admin Computer                    External Host (Optional)
 └───────────┼─────────────┘
             │ WebSocket
             ▼
-┌─────────────────────────┐
-│   WebSocket Server      │
-│   (Node.js - Port 3001) │
-│  ┌──────────────────┐   │
-│  │ Session Manager  │   │
-│  │ AWS Polly TTS    │   │
-│  │ Audio Cache      │   │
-│  └──────────────────┘   │
-└─────────────────────────┘
-            │ HTTP
-            ▼
-┌─────────────────────────┐
-│   PWA Client Server     │
-│   (HTTP - Port 8080)    │
-│  ┌──────────────────┐   │
-│  │ Serves Web App   │   │
-│  │ Static Files     │   │
-│  │ Service Worker   │   │
-│  └──────────────────┘   │
-└─────────────────────────┘
-            │ HTTP/WebSocket
-            ▼
+┌─────────────────────────┐      ┌─────────────────────────┐
+│   WebSocket Server      │      │   PWA Client Server     │
+│   (Node.js - Port 3001) │      │   (HTTP - Port 8080)    │
+│  ┌──────────────────┐   │      │  ┌──────────────────┐   │
+│  │ Session Manager  │   │      │  │ Serves Web App   │   │
+│  │ AWS Polly TTS    │   │      │  │ Static Files     │   │
+│  │ Audio Cache      │   │      │  │ Service Worker   │   │
+│  │ /audio/ endpoint │   │      │  └──────────────────┘   │
+│  └──────────────────┘   │      └─────────────────────────┘
+└─────────────────────────┘                  │ HTTP (static files)
+            │ WebSocket + HTTP (/audio/)     │
+            │                                │
+            └────────────────┬───────────────┘
+                            ▼
 ┌───────────────────────────────────────────────┐
 │              Client Devices (WiFi)            │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
 │  │ Phone/PWA   │  │ Tablet/PWA  │  │ Laptop/PWA  │
 │  │ Web Browser │  │ Web Browser │  │ Web Browser │
 │  │             │  │             │  │             │
-│  │ • Connects  │  │ • Connects  │  │ • Connects  │
-│  │   to :8080  │  │   to :8080  │  │   to :8080  │
+│  │ • Loads PWA │  │ • Loads PWA │  │ • Loads PWA │
+│  │   from :8080│  │   from :8080│  │   from :8080│
 │  │ • WebSocket │  │ • WebSocket │  │ • WebSocket │
 │  │   to :3001  │  │   to :3001  │  │   to :3001  │
-│  │ • AWS Polly │  │ • AWS Polly │  │ • AWS Polly │
-│  │   or Local  │  │   or Local  │  │   or Local  │
-│  │   TTS       │  │   TTS       │  │   TTS       │
+│  │ • Audio via │  │ • Audio via │  │ • Audio via │
+│  │   :3001/audio │  │   :3001/audio│  │   :3001/audio │
+│  │ • Local TTS │  │ • Local TTS │  │ • Local TTS │
+│  │   fallback  │  │   fallback  │  │   fallback  │
 │  └─────────────┘  └─────────────┘  └─────────────┘
 └───────────────────────────────────────────────────────┘
 ```
