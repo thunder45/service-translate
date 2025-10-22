@@ -84,10 +84,16 @@ After deployment, save these values:
 - **No DynamoDB**: No session or connection management needed
 
 ### Admin Management Scripts
-- **create-admin.sh**: Creates admin users in Cognito User Pool
-- **change-password.sh**: Changes user passwords (first login)
-- **get-token.sh**: Retrieves JWT tokens for authentication
-- **test-connection.sh**: Validates authentication setup
+
+#### Cross-Platform Scripts (Bash + PowerShell)
+- **manage-auth.sh** / **manage-auth.ps1**: Consolidated script for all auth operations
+  - `get-token` - Retrieves JWT tokens for authentication
+  - `change-password` - Changes user passwords (first login)
+  - `create-user` - Creates admin users in Cognito User Pool
+  - `delete-user` - Removes users from Cognito User Pool
+  - `list-users` - Lists all users in the pool
+- **test-connection.sh** / **test-connection.ps1**: Tests WebSocket connection to cloud deployment
+- **verify-deployment.sh** / **verify-deployment.ps1**: Validates prerequisites and CDK deployment
 
 ## Key Implementation Details
 
@@ -130,17 +136,38 @@ src/backend/
 
 ### Create Admin User
 ```bash
-./create-admin.sh admin@example.com <UserPoolId>
+# Linux/macOS
+./manage-auth.sh create-user admin@example.com <UserPoolId> <Region>
+
+# Windows PowerShell
+.\manage-auth.ps1 create-user admin@example.com <UserPoolId> <Region>
 ```
 
 ### Change Password (First Login)
 ```bash
-./change-password.sh admin@example.com <UserPoolId>
+# Linux/macOS
+./manage-auth.sh change-password admin@example.com <UserPoolId> <ClientId>
+
+# Windows PowerShell
+.\manage-auth.ps1 change-password admin@example.com <UserPoolId> <ClientId>
 ```
 
 ### Get Authentication Token
 ```bash
-./get-token.sh admin@example.com password <UserPoolId> <ClientId>
+# Linux/macOS
+./manage-auth.sh get-token admin@example.com <UserPoolId> <ClientId>
+
+# Windows PowerShell
+.\manage-auth.ps1 get-token admin@example.com <UserPoolId> <ClientId>
+```
+
+### Test Deployment
+```bash
+# Linux/macOS
+./verify-deployment.sh
+
+# Windows PowerShell
+.\verify-deployment.ps1
 ```
 
 ## Monitoring

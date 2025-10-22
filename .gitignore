@@ -36,3 +36,6 @@ src/websocket-server/audio-cache/
 src/websocket-server/.jwt-secret
 src/websocket-server/data/
 src/websocket-server/admin-identities/
+
+# Test (ignore them for now)
+test/

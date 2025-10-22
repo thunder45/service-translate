@@ -127,7 +127,7 @@ SESSION_TIMEOUT_MINUTES=480
 SESSION_CLEANUP_ENABLED=true
 
 # WebSocket Server Configuration
-PORT=$port
+WS_PORT=$port
 
 # Logging
 LOG_LEVEL=info

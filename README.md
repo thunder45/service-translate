@@ -204,10 +204,16 @@ npm run deploy
 cd src/backend
 
 # Create admin user in Cognito User Pool
+# Linux/macOS
 ./manage-auth.sh create-user admin@example.com <UserPoolId> <Region>
+# Windows PowerShell
+.\manage-auth.ps1 create-user admin@example.com <UserPoolId> <Region>
 
-# Change password (for first login)
+# Change password (if needed)
+# Linux/macOS
 ./manage-auth.sh change-password admin@example.com <UserPoolId> <ClientId>
+# Windows PowerShell
+.\manage-auth.ps1 change-password admin@example.com <UserPoolId> <ClientId>
 ```
 
 ### 3. Setup WebSocket Server with Cognito Authentication

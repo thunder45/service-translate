@@ -131,22 +131,22 @@ cmd_create_user() {
     validate_password "$password" || exit 1
     
     local temp_pwd=$(openssl rand -base64 12)
-    
+
     aws cognito-idp admin-create-user \
         --user-pool-id "$pool_id" \
         --username "$email" \
-        --user-attributes Name=email,Value="$email",Name=email_verified,Value=true \
+        --user-attributes Name=email,Value="$email" Name=email_verified,Value=true \
         --temporary-password "$temp_pwd" \
         --message-action SUPPRESS \
-        --region "$region" &> /dev/null
+        --region "$region"
     
     echo "$password" | aws cognito-idp admin-set-user-password \
         --user-pool-id "$pool_id" \
         --username "$email" \
         --password "$(cat)" \
         --permanent \
-        --region "$region" &> /dev/null
-    
+        --region "$region"
+
     [ $? -eq 0 ] && print_success "User created: $email" || { print_error "Failed to create user"; exit 1; }
 }
 
@@ -170,7 +170,8 @@ cmd_list_users() {
     aws cognito-idp list-users \
         --user-pool-id "$pool_id" \
         --region "$region" \
-        --query 'Users[*].[Username,UserStatus,Enabled]' \
+        --attributes-to-get email \
+        --query 'Users[*].[Username, Attributes[?Name==`email`].Value | [0], UserStatus, Enabled]' \
         --output table
 }
 

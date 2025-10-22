@@ -2,15 +2,25 @@
 
 ## Unified Auth Management Script
 
-All Cognito authentication operations are now consolidated in `manage-auth.sh`.
+All Cognito authentication operations are consolidated in cross-platform scripts:
+- **Linux/macOS**: `manage-auth.sh` 
+- **Windows**: `manage-auth.ps1`
 
 ### Get JWT Tokens
 ```bash
+# Linux/macOS
 ./manage-auth.sh get-token <username> <pool-id> <client-id>
+
+# Windows PowerShell
+.\manage-auth.ps1 get-token <username> <pool-id> <client-id>
 ```
 **Example**:
 ```bash
+# Linux/macOS
 ./manage-auth.sh get-token admin@example.com us-east-1_ABC123 xyz789client
+
+# Windows PowerShell
+.\manage-auth.ps1 get-token admin@example.com us-east-1_ABC123 xyz789client
 ```
 **Output**: Access token, ID token, refresh token, and expiry time
 
@@ -18,11 +28,19 @@ All Cognito authentication operations are now consolidated in `manage-auth.sh`.
 
 ### Change Password
 ```bash
+# Linux/macOS
 ./manage-auth.sh change-password <username> <pool-id> <client-id>
+
+# Windows PowerShell
+.\manage-auth.ps1 change-password <username> <pool-id> <client-id>
 ```
 **Example**:
 ```bash
+# Linux/macOS
 ./manage-auth.sh change-password admin@example.com us-east-1_ABC123 xyz789client
+
+# Windows PowerShell
+.\manage-auth.ps1 change-password admin@example.com us-east-1_ABC123 xyz789client
 ```
 **Prompts**: Temporary password, new password, confirmation
 
@@ -36,11 +54,19 @@ All Cognito authentication operations are now consolidated in `manage-auth.sh`.
 
 ### Create User
 ```bash
+# Linux/macOS
 ./manage-auth.sh create-user <email> <pool-id> <region>
+
+# Windows PowerShell
+.\manage-auth.ps1 create-user <email> <pool-id> <region>
 ```
 **Example**:
 ```bash
+# Linux/macOS
 ./manage-auth.sh create-user newuser@example.com us-east-1_ABC123 us-east-1
+
+# Windows PowerShell
+.\manage-auth.ps1 create-user newuser@example.com us-east-1_ABC123 us-east-1
 ```
 **Prompts**: Password and confirmation
 
@@ -53,11 +79,19 @@ All Cognito authentication operations are now consolidated in `manage-auth.sh`.
 
 ### Delete User
 ```bash
+# Linux/macOS
 ./manage-auth.sh delete-user <username> <pool-id> <region>
+
+# Windows PowerShell
+.\manage-auth.ps1 delete-user <username> <pool-id> <region>
 ```
 **Example**:
 ```bash
+# Linux/macOS
 ./manage-auth.sh delete-user olduser@example.com us-east-1_ABC123 us-east-1
+
+# Windows PowerShell
+.\manage-auth.ps1 delete-user olduser@example.com us-east-1_ABC123 us-east-1
 ```
 **Prompts**: Confirmation (must type "yes")
 
@@ -65,29 +99,21 @@ All Cognito authentication operations are now consolidated in `manage-auth.sh`.
 
 ### List Users
 ```bash
+# Linux/macOS
 ./manage-auth.sh list-users <pool-id> <region>
+
+# Windows PowerShell
+.\manage-auth.ps1 list-users <pool-id> <region>
 ```
 **Example**:
 ```bash
+# Linux/macOS
 ./manage-auth.sh list-users us-east-1_ABC123 us-east-1
+
+# Windows PowerShell
+.\manage-auth.ps1 list-users us-east-1_ABC123 us-east-1
 ```
 **Output**: Table with username, status, and enabled state
-
----
-
-## Legacy Scripts (Still Available)
-
-### get-token.sh
-```bash
-./get-token.sh <username> <pool-id> <client-id>
-```
-**Status**: ✅ Still works, but prefer `manage-auth.sh get-token`
-
-### change-password.sh
-```bash
-./change-password.sh <username> <pool-id> <client-id>
-```
-**Status**: ✅ Still works, but prefer `manage-auth.sh change-password`
 
 ---
 
@@ -172,10 +198,16 @@ npm run deploy
 
 # 3. Create admin user
 cd ../..
+# Linux/macOS
 ./src/backend/manage-auth.sh create-user admin@example.com us-east-1_ABC123 us-east-1
+# Windows PowerShell
+.\src\backend\manage-auth.ps1 create-user admin@example.com us-east-1_ABC123 us-east-1
 
 # 4. Get tokens
+# Linux/macOS
 ./src/backend/manage-auth.sh get-token admin@example.com us-east-1_ABC123 xyz789client
+# Windows PowerShell
+.\src\backend\manage-auth.ps1 get-token admin@example.com us-east-1_ABC123 xyz789client
 
 # 5. Use tokens in your application
 ```
@@ -190,7 +222,28 @@ aws cognito-idp admin-set-user-password \
   --region us-east-1
 
 # User changes to permanent password
+# Linux/macOS
 ./manage-auth.sh change-password user@example.com us-east-1_ABC123 xyz789client
+# Windows PowerShell
+.\manage-auth.ps1 change-password user@example.com us-east-1_ABC123 xyz789client
+```
+
+### Verify Deployment Prerequisites:
+```bash
+# Linux/macOS
+./verify-deployment.sh
+
+# Windows PowerShell
+.\verify-deployment.ps1
+```
+
+### Test Cloud WebSocket Connection:
+```bash
+# Linux/macOS
+./test-connection.sh <websocket-url> <token> [device-id]
+
+# Windows PowerShell
+.\test-connection.ps1 <websocket-url> <token> [device-id]
 ```
 
 ---
