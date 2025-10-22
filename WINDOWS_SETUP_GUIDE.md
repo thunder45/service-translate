@@ -269,14 +269,16 @@ If running the WebSocket server:
    - Search for "Windows Defender Firewall"
    - Click "Advanced settings"
 
-2. **Create Inbound Rule**:
+2. **Create Inbound Rules**:
    - Click "Inbound Rules" → "New Rule"
    - Select "Port" → "Next"
-   - Select "TCP" → Specific local ports: **3001** (WebSocket server default)
+   - Select "TCP" → Specific local ports: **3001,8080** (default ports)
    - Select "Allow the connection" → "Next"
    - Check all profiles (Domain, Private, Public) → "Next"
-   - Name: "Service Translate WebSocket"
+   - Name: "Service Translate Servers"
    - Click "Finish"
+
+**For Custom Ports**: If using custom ports (e.g., WS_PORT=4001 PWA_PORT=9090), update the port numbers accordingly in the firewall rule.
 
 ### Step 3: AWS Credentials Configuration
 

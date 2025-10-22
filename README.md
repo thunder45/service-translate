@@ -168,6 +168,21 @@ npm install
 # COGNITO_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
+### Port Configuration
+
+Both servers support configurable ports:
+
+```bash
+# WebSocket Server (default: 3001)
+WS_PORT=4001 cd src/websocket-server && npm start
+
+# PWA Client Server (default: 8080)  
+PWA_PORT=9090 cd src/client-pwa && npm start
+
+# Setup scripts automatically configure firewall for custom ports
+WS_PORT=4001 PWA_PORT=9090 ./setup-macos.sh
+```
+
 **Unified Authentication:**
 The WebSocket server uses AWS Cognito for admin authentication, providing a single set of credentials for both AWS services and session management. The `setup-unified-auth.sh` script will:
 - Parse Cognito configuration from CDK deployment output

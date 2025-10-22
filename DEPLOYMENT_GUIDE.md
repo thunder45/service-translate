@@ -37,32 +37,29 @@ This guide covers the complete setup and deployment of Service Translate with TT
 ### 1. Install Dependencies
 
 ```bash
-# Install all project dependencies
-npm run install:all
-
-# Or install individually
+# Install all project dependencies individually
 npm install
 cd src/websocket-server && npm install
 cd ../capture && npm install
 cd ../client-pwa && npm install
 ```
 
-### 2. Run Setup Script
+### 2. Run Setup Scripts
 
 ```bash
-# Run the automated setup
-npm run setup
+# macOS Setup
+cd src/capture && ./setup-macos.sh
 
-# For development environment
-npm run setup:dev
+# Windows Setup  
+cd src/capture && .\setup-windows.ps1
 ```
 
-The setup script will:
-- Create necessary directories
-- Generate configuration files
-- Validate AWS credentials
-- Check network configuration
-- Create startup scripts
+The setup scripts will:
+- Install system dependencies (sox, etc.)
+- Install npm dependencies for all modules
+- Configure firewall rules for configurable ports
+- Build TypeScript code
+- Validate system requirements
 
 ## Configuration
 
@@ -87,9 +84,14 @@ AWS_POLLY_OUTPUT_FORMAT=mp3
 
 #### Server Configuration
 ```env
-WEBSOCKET_HOST=localhost
-WEBSOCKET_PORT=3001
-HTTP_SERVER_PORT=3000
+# WebSocket Server (configurable via WS_PORT environment variable)
+WS_PORT=3001
+
+# PWA Client Server (configurable via PWA_PORT environment variable)  
+PWA_PORT=8080
+
+# Host binding
+WEBSOCKET_HOST=127.0.0.1
 ```
 
 #### Audio Storage
@@ -108,71 +110,71 @@ MAX_CLIENTS_PER_SESSION=50
 
 ## Deployment Modes
 
-Service Translate supports three deployment modes:
+Service Translate operates in local network mode by default:
 
-### 1. Local Mode (Default)
-- Single machine deployment
-- Admin and server on same computer
-- Clients connect via local network
+### Local Network Deployment
+- **Admin App**: Runs on main computer for audio capture and translation
+- **WebSocket Server**: Handles client connections and TTS processing  
+- **PWA Client Server**: Serves web interface for mobile devices
+- **Client Access**: Mobile devices connect via local WiFi network
 
-```bash
-npm run start:local
+**Architecture**:
 ```
-
-### 2. Network Mode
-- Server accessible via LAN
-- Multiple admin connections possible
-- Enhanced security features
-
-```bash
-npm run start:network
-```
-
-### 3. Cloud Mode
-- Server hosted remotely
-- Global accessibility
-- Advanced monitoring
-
-```bash
-npm run start:cloud
+Admin Computer               Client Devices (WiFi)
+┌─────────────────┐          ┌──────────────┐
+│ Capture App     │          │ Phone/Tablet │
+│ WebSocket Server│◄────────►│ (Browser)    │
+│ PWA Server      │          │ Port 8080    │
+│ Ports 3001,8080 │          └──────────────┘
+└─────────────────┘
 ```
 
 ## Starting Services
 
 ### Quick Start (Recommended)
 
-```bash
-# Start all services in local mode
-npm run start:local
-```
-
-### Manual Start
+Start each service in separate terminal windows:
 
 ```bash
-# Start individual services
-npm run start:server    # WebSocket server
-npm run start:pwa       # PWA HTTP server
-npm run start:capture   # Admin application
+# Terminal 1: Start WebSocket Server
+cd src/websocket-server
+npm start
+
+# Terminal 2: Start PWA Client Server
+cd src/client-pwa  
+npm start
+
+# Terminal 3: Start Capture App
+cd src/capture
+npm run dev
 ```
 
-### Development Mode
+### Individual Service Commands
 
 ```bash
-# Start with hot reload and debugging
-npm run start:dev
+# WebSocket server (handles TTS and client connections)
+cd src/websocket-server && npm start
+
+# PWA client server (serves web interface to mobile devices)
+cd src/client-pwa && npm start  
+
+# Capture app (admin interface for audio capture)
+cd src/capture && npm run dev
 ```
 
-### Platform-Specific Scripts
+### Service Configuration
 
-#### Linux/macOS
+**WebSocket Server Port**: Configurable via `WS_PORT` environment variable
 ```bash
-./start-service-translate.sh
+WS_PORT=4001 cd src/websocket-server && npm start  # Custom port 4001
 ```
 
-#### Windows
-```cmd
-start-service-translate.bat
+**PWA Server Port**: Configurable via `PWA_PORT` environment variable  
+```bash
+PWA_PORT=9090 cd src/client-pwa && npm start      # Custom port 9090
 ```
+
+**Default Ports**: WebSocket (3001), PWA (8080)
 
 ## Client Connection
 
@@ -188,46 +190,39 @@ start-service-translate.bat
 
 After starting services, you'll see output like:
 ```
-📱 Client connection URL: http://192.168.1.100:3000
+📱 PWA Client URL: http://192.168.1.100:8080
 🌐 WebSocket URL: ws://192.168.1.100:3001
+
+Available on:
+  http://127.0.0.1:8080
+  http://192.168.1.100:8080
 ```
 
 ### QR Code Connection
 
-The system generates a `client-connection.json` file with QR code data for easy client connection.
+Future enhancement - QR code generation for easy mobile connection setup.
 
 ## Maintenance
-
-### Automated Maintenance
-
-```bash
-# Run full maintenance
-npm run maintenance
-
-# View statistics only
-npm run maintenance:stats
-```
 
 ### Manual Cleanup
 
 ```bash
-# Clean all build artifacts and caches
-npm run clean
+# Clean TypeScript build output
+cd src/capture && npm run clean
 
-# Remove old audio files
-rm -rf audio-cache/*
+# Remove old audio files (from WebSocket server)
+cd src/websocket-server && rm -rf audio-cache/*
 
-# Clear logs
+# Clear logs (if they exist)  
 rm -rf logs/*
 ```
 
 ### Monitoring
 
-The system automatically:
-- Tracks AWS service costs
-- Monitors audio cache size
-- Logs system performance
-- Generates maintenance reports
+The WebSocket server provides health endpoints:
+- Health check: `http://localhost:3001/health`
+- Metrics: `http://localhost:3001/metrics`  
+- Security stats: `http://localhost:3001/security`
 
 ## Troubleshooting
 
@@ -235,14 +230,15 @@ The system automatically:
 
 #### Port Already in Use
 ```bash
-# Check what's using the port
-lsof -i :3000
-lsof -i :3001
+# Check what's using the ports (default: 8080 for PWA, 3001 for WebSocket)
+lsof -i :8080   # PWA server
+lsof -i :3001   # WebSocket server
 
-# Kill the process or change ports in .env
+# Kill processes or use custom ports
+WS_PORT=4001 PWA_PORT=9090 # Use different ports
 ```
 
-#### AWS Credentials Issues
+#### AWS Credentials Issues  
 ```bash
 # Test AWS CLI configuration
 aws sts get-caller-identity
@@ -253,12 +249,15 @@ aws configure
 
 #### Network Connection Problems
 ```bash
-# Check network configuration
-npm run maintenance:stats
+# Test WebSocket server health
+curl http://localhost:3001/health
+
+# Test PWA server 
+curl http://localhost:8080
 
 # Verify firewall settings
 # Windows: Windows Defender Firewall
-# macOS: System Preferences > Security & Privacy > Firewall
+# macOS: System Preferences > Security & Privacy > Firewall  
 # Linux: sudo ufw status
 ```
 
@@ -291,24 +290,26 @@ System logs are stored in:
 - Ensure all devices on same WiFi network
 - Check firewall settings
 - Verify WebSocket server is running
-- Test with `curl http://localhost:3000/health`
+- Test with `curl http://localhost:3001/health`
 
 ### Getting Help
 
-1. **Check Logs**: Review log files for error messages
-2. **Run Diagnostics**: Use `npm run maintenance:stats`
-3. **Verify Configuration**: Check `.env` file settings
+1. **Check Server Health**: Use `curl http://localhost:3001/health`
+2. **Review Console Logs**: Check terminal output for errors
+3. **Verify Ports**: Ensure no port conflicts (3001, 8080)
 4. **Test Components**: Start services individually
-5. **Network Issues**: Use connection instructions in `CONNECTION_INSTRUCTIONS.md`
+5. **Check Authentication**: Review ADMIN_AUTHENTICATION_GUIDE.md
 
 ### Reset to Default
 
 ```bash
-# Complete reset
-npm run clean
-rm .env
-rm -rf audio-cache logs temp
-npm run setup
+# Clean build outputs
+cd src/capture && npm run clean
+cd ../websocket-server && rm -rf audio-cache/* logs/*
+cd ../client-pwa && rm -rf node_modules/.cache/*
+
+# Rebuild everything
+npm run build  # From each service directory
 ```
 
 ## Advanced Configuration

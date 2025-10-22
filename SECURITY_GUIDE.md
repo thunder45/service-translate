@@ -26,43 +26,67 @@ Service Translate implements multiple layers of security:
 
 ## Authentication
 
-### Configuration
+### AWS Cognito Authentication (Current System)
 
-Authentication is controlled by environment variables:
+Service Translate uses **AWS Cognito** for unified authentication. Authentication is **always enabled** and required.
 
 ```env
-# Enable/disable authentication
-ENABLE_AUTH=false
+# Cognito Configuration (REQUIRED)
+COGNITO_REGION=us-east-1
+COGNITO_USER_POOL_ID=us-east-1_xxxxxx
+COGNITO_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxx
 
-# Authentication credentials (required if ENABLE_AUTH=true)
-AUTH_USERNAME=admin
-AUTH_PASSWORD=your-secure-password-here
-
-# Session timeout (in milliseconds)
-AUTH_SESSION_TIMEOUT=86400000  # 24 hours
+# Token Configuration
+# Access Token: 1 hour (configurable in Cognito)
+# ID Token: 1 hour (configurable in Cognito)  
+# Refresh Token: 30 days (configurable in Cognito)
 ```
 
-### Password Requirements
+### Cognito User Pool Requirements
 
-For secure deployments, passwords should:
-- Be at least 8 characters long
-- Include uppercase and lowercase letters
-- Include numbers
-- Include special characters
-- Not be dictionary words or common patterns
+Your Cognito User Pool Client must be configured with:
 
-### Generating Secure Credentials
+- **Client Type**: Public client (no secret)
+- **Auth Flows**: 
+  - `ALLOW_USER_PASSWORD_AUTH` ✅ Required
+  - `ALLOW_REFRESH_TOKEN_AUTH` ✅ Required
+- **Token Expiry**:
+  - Access Token: 60 minutes (recommended)
+  - ID Token: 60 minutes (recommended)
+  - Refresh Token: 43200 minutes (30 days)
 
-Use the built-in credential generator:
+### Password Security
+
+Cognito manages password policies. Configure in AWS Console:
+- Minimum password length: 8+ characters
+- Require uppercase letters
+- Require lowercase letters  
+- Require numbers
+- Require special characters
+- Password history: 12 previous passwords
+- Temporary password validity: 7 days
+
+### User Management
+
+Create admin users in Cognito User Pool:
 
 ```bash
-npm run security:generate
+# Create admin user
+aws cognito-idp admin-create-user \
+  --user-pool-id us-east-1_xxxxxx \
+  --username admin@example.com \
+  --user-attributes Name=email,Value=admin@example.com \
+  --temporary-password TempPassword123!
+
+# Set permanent password (user will be prompted on first login)
+aws cognito-idp admin-set-user-password \
+  --user-pool-id us-east-1_xxxxxx \
+  --username admin@example.com \
+  --password SecurePassword123! \
+  --permanent
 ```
 
-This generates:
-- Strong session secret
-- Secure authentication credentials
-- Proper configuration format
+**Note**: All users in the Cognito User Pool have admin access to WebSocket server.
 
 ## Session Security
 
@@ -162,20 +186,23 @@ WEBSOCKET_CORS_ORIGIN=https://yourdomain.com,https://app.yourdomain.com
 
 #### Windows Firewall
 ```cmd
-# Allow WebSocket and HTTP ports
+# Allow WebSocket and PWA client ports (configurable)
 netsh advfirewall firewall add rule name="Service Translate WebSocket" dir=in action=allow protocol=TCP localport=3001
-netsh advfirewall firewall add rule name="Service Translate HTTP" dir=in action=allow protocol=TCP localport=3000
+netsh advfirewall firewall add rule name="Service Translate PWA" dir=in action=allow protocol=TCP localport=8080
+
+# For custom ports, update port numbers accordingly:
+# WS_PORT=4001 PWA_PORT=9090
 ```
 
 #### Linux (UFW)
 ```bash
-# Allow specific ports
-sudo ufw allow 3000/tcp
-sudo ufw allow 3001/tcp
+# Allow specific ports (default: WebSocket 3001, PWA 8080)
+sudo ufw allow 3001/tcp  # WebSocket server
+sudo ufw allow 8080/tcp  # PWA client server
 
 # Allow from specific network only
-sudo ufw allow from 192.168.1.0/24 to any port 3000
 sudo ufw allow from 192.168.1.0/24 to any port 3001
+sudo ufw allow from 192.168.1.0/24 to any port 8080
 ```
 
 #### macOS
@@ -255,29 +282,33 @@ SECURITY_AUDIT_REPORT.md    # Periodic audit reports
 
 ### Security Endpoints
 
-Monitor security status via HTTP endpoints:
+Monitor security status via HTTP endpoints (WebSocket server):
 
 ```bash
 # Overall health including security stats
-curl http://localhost:3000/health
+curl http://localhost:3001/health
 
 # Detailed security statistics
-curl http://localhost:3000/security
+curl http://localhost:3001/security
 
 # Performance metrics
-curl http://localhost:3000/metrics
+curl http://localhost:3001/metrics
 ```
 
-### Running Security Audits
+### Manual Security Checks
 
-Regular security audits:
+Regular security verification:
 
 ```bash
-# Run comprehensive security audit
-npm run security:audit
+# Check npm vulnerabilities
+npm audit
+npm audit fix
 
-# Check specific security aspects
-npm run maintenance:stats
+# Verify Cognito configuration
+grep -E "COGNITO_" src/websocket-server/.env
+
+# Test authentication flow
+# (Use capture app to test login/logout)
 ```
 
 ## Best Practices
@@ -405,46 +436,52 @@ npm run maintenance:stats
 
 ## Troubleshooting Security Issues
 
-### Authentication Problems
+### Cognito Authentication Problems
 
 ```bash
-# Check authentication configuration
-grep -E "ENABLE_AUTH|AUTH_" .env
+# Check Cognito configuration
+grep -E "COGNITO_" src/websocket-server/.env
 
-# Test authentication endpoint
-curl -X POST http://localhost:3000/auth \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"your-password"}'
+# Verify Cognito User Pool exists
+aws cognito-idp describe-user-pool \
+  --user-pool-id us-east-1_xxxxxx \
+  --region us-east-1
+
+# Test Cognito user login (use capture app)
+cd src/capture && npm run dev
 ```
 
 ### Rate Limiting Issues
 
-```bash
+```bash  
 # Check rate limit status
-curl http://localhost:3000/security
+curl http://localhost:3001/security
 
-# Reset rate limits (restart server)
-npm run start:server
+# Reset rate limits by restarting WebSocket server
+cd src/websocket-server && npm start
 ```
 
 ### Session Problems
 
 ```bash
-# Validate session format
+# Validate basic session format
 node -e "console.log(/^CHURCH-\d{4}-\d{3}$/.test('CHURCH-2025-001'))"
 
-# Check session security settings
-grep -E "SESSION_|SECURE_" .env
+# Check WebSocket server session management
+curl http://localhost:3001/health
 ```
 
 ### Network Connectivity
 
 ```bash
-# Test WebSocket connection
-wscat -c ws://localhost:3001
+# Test WebSocket server connection
+curl http://localhost:3001/health
 
-# Test HTTP endpoints
-curl http://localhost:3000/health
+# Test PWA client server
+curl http://localhost:8080
+
+# Test WebSocket protocol (if wscat installed)
+# wscat -c ws://localhost:3001
 ```
 
 ## Security Updates
