@@ -84,9 +84,9 @@ Authenticates admin user with Cognito username and password. Used for initial lo
 ```
 
 **Cognito Token Details:**
-- **accessToken**: Cognito access token (JWT) - used for API authorization (1 hour expiry)
-- **idToken**: Cognito ID token (JWT) - contains user information
-- **refreshToken**: Cognito refresh token (encrypted JWT) - used to obtain new access tokens (30 day expiry)
+- **accessToken**: Cognito access token - used for API authorization (1 hour expiry)
+- **idToken**: Cognito ID token - contains user information
+- **refreshToken**: Cognito refresh token - used to obtain new access tokens (30 day expiry)
 - **expiresIn**: Access token expiry in seconds (typically 3600 = 1 hour)
 
 **Error Response:**

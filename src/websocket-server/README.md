@@ -47,16 +47,16 @@ The server implements persistent admin authentication to maintain session owners
 ```
 Admin Authentication → Admin Identity Manager → Admin Identity Store → Session Manager
                               ↓                          ↓
-                       JWT Token Management    File-based Persistence
+                    Cognito Token Validation   File-based Persistence
                                                 (./admin-identities/)
 ```
 
 **Key Components:**
 - **AdminIdentityManager**: Orchestrates admin authentication, session recovery, and token management
 - **AdminIdentityStore**: Manages persistent admin identities with file-based storage
-- **Admin Identity**: Persistent UUID-based identifier for admin users
+- **Admin Identity**: Persistent UUID-based identifier for admin users (Cognito sub)
 - **Session Ownership**: Sessions are linked to admin identities, not socket connections
-- **JWT Tokens**: Secure token-based authentication with automatic refresh
+- **Cognito Tokens**: Access/ID/refresh tokens issued and validated by AWS Cognito
 - **Lifecycle Management**: Automatic cleanup of inactive admins and expired tokens
 
 #### AdminIdentityManager
@@ -139,40 +139,40 @@ adminManager.notifyAdminConnections(adminId, (socketId) => {
 
 **Security Considerations:**
 
-1. **JWT Secret Management**:
-   - Secret is generated on first run and stored in `.env`
-   - Use strong, randomly generated secrets (256-bit minimum)
-   - Rotate secrets periodically (recommended: every 90 days)
-   - Never commit secrets to version control
-
-2. **Token Expiry**:
-   - Access tokens: Short-lived (default: 1 hour)
+1. **Cognito Token Management**:
+   - Access tokens: Short-lived (default: 1 hour) 
+   - ID tokens: Contains user information (sub, email, username)
    - Refresh tokens: Long-lived (default: 30 days)
-   - Tokens are invalidated on logout or security events
+   - All tokens issued and validated by AWS Cognito
 
-3. **Token Validation**:
-   - All admin operations require valid access token
-   - Token version checking prevents use of invalidated tokens
-   - Refresh tokens are single-use and rotated on refresh
+2. **Token Security**:
+   - Tokens validated against Cognito User Pool on every operation
+   - Automatic token refresh before expiry
+   - Secure client-side storage using Electron safeStorage
+   - Server-side tokens stored in memory only
 
-4. **Session Ownership**:
-   - Strict verification before any session modification
-   - Read-only access allowed for non-owned sessions
-   - Audit logging for all admin operations
+3. **Session Ownership**:
+   - Sessions linked to Cognito sub (UUID) for persistent identity
+   - Admin can reconnect and regain session control
+   - Strict ownership verification for write operations
+   - Read-only access for non-owned sessions
+
+4. **Authentication Flow**:
+   - Credential-based authentication for initial login
+   - Token-based authentication for reconnection
+   - Automatic token refresh with Cognito refresh tokens
+   - Session recovery across reconnections
 
 **Configuration:**
 
 ```typescript
-const jwtConfig: JWTConfig = {
-  secret: process.env.JWT_SECRET || 'generated-secret',
-  algorithm: 'HS256',
-  issuer: 'service-translate-ws',
-  audience: 'service-translate-admin',
-  accessTokenExpiry: '1h',
-  refreshTokenExpiry: '30d'
-};
+const cognitoAuth = new CognitoAuthService({
+  region: process.env.COGNITO_REGION,
+  userPoolId: process.env.COGNITO_USER_POOL_ID,
+  clientId: process.env.COGNITO_CLIENT_ID
+});
 
-const adminManager = new AdminIdentityManager(adminStore, jwtConfig);
+const adminManager = new AdminIdentityManager(adminStore, cognitoAuth);
 ```
 
 **Admin Session Recovery Workflow:**
@@ -224,11 +224,11 @@ The WebSocket server supports two types of connections: admin connections (from 
      password: '***'
    }
    ↓
-4. Server validates credentials via AuthManager
+4. Server validates credentials with Cognito via CognitoAuthService
    ↓
 5. Server creates/retrieves admin identity via AdminIdentityManager
    ↓
-6. Server generates JWT token pair (access + refresh)
+6. Server receives Cognito tokens from authentication
    ↓
 7. Server schedules token expiry warning (5 min before expiry)
    ↓
@@ -236,10 +236,10 @@ The WebSocket server supports two types of connections: admin connections (from 
    {
      type: 'admin-auth-response',
      success: true,
-     adminId: 'uuid',
+     adminId: 'cognito-sub-uuid',
      username: 'admin',
-     token: 'jwt-access-token',
-     refreshToken: 'jwt-refresh-token',
+     accessToken: 'cognito-access-token',
+     refreshToken: 'cognito-refresh-token',
      tokenExpiry: '2025-10-09T15:00:00Z',
      ownedSessions: [...],  // Sessions owned by this admin
      allSessions: [...],    // All active sessions
@@ -254,10 +254,9 @@ The WebSocket server supports two types of connections: admin connections (from 
 #### Admin Reconnection (Token-Based)
 
 ```
-1. Client connects to WebSocket server with token in auth header
-   Authorization: Bearer <jwt-access-token>
+1. Client connects to WebSocket server with Cognito access token
    ↓
-2. Server validates token and extracts admin identity
+2. Server validates Cognito token with AWS and extracts admin identity
    ↓
 3. Server registers admin connection with existing identity
    ↓
@@ -299,22 +298,22 @@ The WebSocket server supports two types of connections: admin connections (from 
 2. Client sends token refresh request
    {
      type: 'token-refresh',
-     refreshToken: 'jwt-refresh-token',
+     refreshToken: 'cognito-refresh-token',
      adminId: 'uuid'
    }
    ↓
-3. Server validates refresh token
+3. Server validates refresh token with Cognito
    ↓
-4. Server generates new token pair
+4. Server receives new token pair from Cognito
    ↓
 5. Server removes old refresh token
    ↓
-6. Server sends new tokens
+6. Server sends new Cognito tokens
    {
      type: 'token-refresh-response',
      success: true,
-     token: 'new-jwt-access-token',
-     refreshToken: 'new-jwt-refresh-token',
+     accessToken: 'new-cognito-access-token',
+     refreshToken: 'new-cognito-refresh-token',
      tokenExpiry: '2025-10-09T16:00:00Z'
    }
    ↓
@@ -341,7 +340,7 @@ The WebSocket server supports two types of connections: admin connections (from 
    ↓
 5. Client re-authenticates with credentials
    ↓
-6. Server generates new tokens
+6. Server gets new Cognito tokens via authentication
    ↓
 7. Admin sessions are recovered
    ↓
@@ -437,21 +436,17 @@ npm install
 
 **2. Configure Environment Variables**
 
-Create `.env` file with admin authentication settings:
+Create `.env` file with Cognito authentication settings:
 
 ```bash
 # Server Configuration
-PORT=3001
+WS_PORT=3001
 NODE_ENV=production
 
-# Admin Authentication
-ENABLE_AUTH=true
-AUTH_USERNAME=admin
-AUTH_PASSWORD=your-secure-password-here
-
-# JWT Configuration
-JWT_ACCESS_TOKEN_EXPIRY=1h
-JWT_REFRESH_TOKEN_EXPIRY=30d
+# Cognito Authentication (REQUIRED)
+COGNITO_REGION=us-east-1
+COGNITO_USER_POOL_ID=us-east-1_xxxxxx
+COGNITO_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxx
 
 # Security
 WEBSOCKET_RATE_LIMIT_PER_SECOND=10
@@ -462,17 +457,18 @@ SESSION_TIMEOUT_MINUTES=480
 ENABLE_TTS=false
 ```
 
-**3. Generate JWT Secret**
+**3. Deploy AWS Cognito (Required)**
 
-The server automatically generates a JWT secret on first run:
+Deploy the Cognito User Pool via CDK:
 
 ```bash
-npm start
-# JWT secret will be created at .jwt-secret
-# Backup this file for disaster recovery
+cd ../../backend
+npm install
+npm run deploy
+# Note the Cognito outputs and add to .env above
 ```
 
-**Important**: The `.jwt-secret` file is critical for token validation. Back it up securely and never commit it to version control.
+**Important**: Cognito authentication is required - there is no local authentication option.
 
 **4. Create Admin Identities Directory**
 
@@ -492,37 +488,33 @@ npm start
 
 **Security Hardening:**
 
-1. **Strong Passwords**
-   ```bash
-   # Generate secure password
-   openssl rand -base64 32
-   # Use in AUTH_PASSWORD
-   ```
+1. **Strong Cognito Passwords**
+   - Configure password policy in Cognito User Pool
+   - Require MFA for admin accounts (recommended)
+   - Use strong passwords when creating Cognito users
 
 2. **File Permissions**
    ```bash
-   # Restrict JWT secret
-   chmod 600 .jwt-secret
-   
-   # Restrict admin identities
+   # Restrict admin identities and sessions
    chmod 700 admin-identities
    chmod 600 admin-identities/*.json
+   chmod 700 sessions
+   chmod 600 sessions/*.json
    ```
 
 3. **Environment Variables**
    ```bash
    # Never commit .env to version control
    echo ".env" >> .gitignore
-   echo ".jwt-secret" >> .gitignore
-   echo "admin-identities/" >> .gitignore
+   echo "admin-identities/" >> .gitignore  
+   echo "sessions/" >> .gitignore
    ```
 
-4. **Token Expiry**
-   ```bash
-   # Shorter tokens for high-security environments
-   JWT_ACCESS_TOKEN_EXPIRY=15m
-   JWT_REFRESH_TOKEN_EXPIRY=7d
-   ```
+4. **Cognito Token Configuration**
+   - Token expiry configured in AWS Cognito User Pool settings
+   - Access tokens: 1 hour (recommended, configurable in Cognito)
+   - Refresh tokens: 30 days (configurable in Cognito)
+   - Server validates tokens issued by Cognito (no server-side token generation)
 
 5. **Rate Limiting**
    ```bash
@@ -641,41 +633,30 @@ cat admin-identities/admin-index.json | jq
 cat admin-identities/cleanup-log.json | jq
 ```
 
-**Token Management:**
+**Admin Data Management:**
 
 ```bash
-# Rotate JWT secret (requires admin re-authentication)
-# 1. Backup old secret
-cp .jwt-secret .jwt-secret.backup
-
-# 2. Generate new secret
-openssl rand -hex 32 > .jwt-secret
-
-# 3. Restart server
-pm2 restart websocket-server
-
-# 4. All admins must re-authenticate
+# No token management required - server only validates Cognito tokens
+# Cognito manages all token issuance, rotation, and expiry
+# Admin identities are the only server-managed persistent data
 ```
 
 **Backup Strategy:**
 
 ```bash
-# Create backup script
+# Create backup script for persistent data
 cat > backup-admin-data.sh << 'EOF'
 #!/bin/bash
 BACKUP_DIR="/backup/websocket-server/$(date +%Y%m%d)"
 mkdir -p "$BACKUP_DIR"
 
-# Backup JWT secret
-cp .jwt-secret "$BACKUP_DIR/"
-
 # Backup admin identities
 cp -r admin-identities "$BACKUP_DIR/"
 
-# Backup sessions
+# Backup sessions  
 cp -r sessions "$BACKUP_DIR/"
 
-# Backup environment
+# Backup environment configuration
 cp .env "$BACKUP_DIR/"
 
 echo "Backup completed: $BACKUP_DIR"
@@ -711,16 +692,16 @@ EOF
 #### Troubleshooting
 
 **Admin Cannot Authenticate:**
-1. Check AUTH_USERNAME and AUTH_PASSWORD in .env
-2. Verify ENABLE_AUTH=true
-3. Check server logs for authentication errors
+1. Check Cognito configuration (COGNITO_USER_POOL_ID, COGNITO_CLIENT_ID, COGNITO_REGION)
+2. Verify Cognito user exists in User Pool
+3. Check server logs for Cognito authentication errors
 4. Verify admin-identities directory permissions
 
 **Token Validation Fails:**
-1. Check .jwt-secret file exists and is readable
-2. Verify JWT_ACCESS_TOKEN_EXPIRY is valid format
-3. Check token hasn't expired
-4. Verify token version matches admin identity
+1. Check Cognito configuration is correct
+2. Verify Cognito access token hasn't expired
+3. Check network connectivity to AWS Cognito service
+4. Verify admin identity exists for Cognito user
 
 **Admin Identity Not Persisting:**
 1. Check admin-identities directory exists
@@ -781,18 +762,18 @@ class PostgresAdminIdentityStore implements AdminIdentityStoreAdapter {
 
 Before deploying to production:
 
-- [ ] Strong AUTH_PASSWORD configured
-- [ ] JWT secret generated and backed up
-- [ ] File permissions set correctly (600 for secrets, 700 for directories)
-- [ ] .env and .jwt-secret in .gitignore
-- [ ] ENABLE_AUTH=true in production
+- [ ] Cognito User Pool deployed and configured
+- [ ] COGNITO_USER_POOL_ID, COGNITO_CLIENT_ID, COGNITO_REGION configured
+- [ ] File permissions set correctly (700 for directories, 600 for files)
+- [ ] .env, admin-identities/, sessions/ in .gitignore
+- [ ] Cognito users created for admin access
 - [ ] Rate limiting configured
 - [ ] Firewall rules configured
 - [ ] SSL/TLS enabled (via reverse proxy)
 - [ ] Log rotation configured
 - [ ] Backup strategy implemented
 - [ ] Monitoring and alerting configured
-- [ ] Token expiry times appropriate for security requirements
+- [ ] Cognito token expiry configured appropriately in User Pool
 - [ ] Admin identity cleanup schedule verified
 
 #### Enhanced SessionManager
@@ -1011,7 +992,7 @@ npm start
 
 ```bash
 # Server
-PORT=3001
+WS_PORT=3001
 
 # Cognito Authentication (REQUIRED)
 COGNITO_REGION=us-east-1                    # AWS region where User Pool is deployed
@@ -1020,20 +1001,18 @@ COGNITO_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxx # From CDK deployment output
 
 # Admin Identity Persistence
 ADMIN_IDENTITIES_DIR=./admin-identities
-ADMIN_IDENTITY_CLEANUP_ENABLED=true
-ADMIN_IDENTITY_RETENTION_DAYS=90
+# Note: ADMIN_IDENTITY_CLEANUP_ENABLED and ADMIN_IDENTITY_RETENTION_DAYS 
+# are documented but currently hardcoded in implementation
 
 # Session Configuration
 SESSION_PERSISTENCE_DIR=./sessions
 SESSION_TIMEOUT_MINUTES=480
-SESSION_CLEANUP_ENABLED=true
+# Note: SESSION_CLEANUP_ENABLED is documented but currently hardcoded in implementation
 
 # TTS (Optional)
 ENABLE_TTS=false                    # Set to 'true' to enable AWS Polly
 AWS_REGION=us-east-1
 AWS_IDENTITY_POOL_ID=               # Cognito Identity Pool ID
-AWS_USER_POOL_ID=                   # Cognito User Pool ID
-AWS_JWT_TOKEN=                      # JWT token (optional)
 
 # Rate Limiting
 WEBSOCKET_RATE_LIMIT_PER_SECOND=10
@@ -1234,7 +1213,7 @@ npm run build
 ### TTS Not Working
 1. Check `ENABLE_TTS=true` in .env
 2. Verify AWS credentials are correct
-3. Check JWT token is valid (not expired)
+3. Check Cognito access token is valid (not expired)
 4. Review server logs for Polly errors
 
 ### Clients Not Receiving Audio
@@ -1265,10 +1244,10 @@ npm run build
 ## Security
 
 ### Best Practices
-1. Enable authentication for production
+1. Authentication is always enabled via Cognito
 2. Use secure session IDs
 3. Set appropriate rate limits
-4. Rotate JWT tokens regularly
+4. Monitor Cognito User Pool for security events
 5. Monitor for unusual activity
 
 ### Rate Limiting
@@ -2065,11 +2044,11 @@ const stats = securityMiddleware.getSecurityStatistics();
 
 #### For Administrators
 
-1. **Strong JWT Secrets:**
-   - Use auto-generated secrets (64 hex characters)
-   - Never commit secrets to version control
+1. **Cognito Configuration Security:**
+   - Protect Cognito User Pool ID and Client ID
+   - Never commit credentials to version control
    - Store in `.env` file with restricted permissions (600)
-   - Rotate secrets every 90 days
+   - Use strong passwords in Cognito User Pool
 
 2. **Token Management:**
    - Keep access token expiry short (1 hour recommended)
@@ -2124,17 +2103,10 @@ const stats = securityMiddleware.getSecurityStatistics();
 ### Security Configuration Reference
 
 ```env
-# JWT Security
-JWT_SECRET=                                    # Auto-generated if not set
-JWT_ALGORITHM=HS256                            # HS256, HS384, or HS512
-JWT_ISSUER=service-translate-ws
-JWT_AUDIENCE=service-translate-admin
-JWT_ACCESS_TOKEN_EXPIRY=1h                     # 1 hour
-JWT_REFRESH_TOKEN_EXPIRY=30d                   # 30 days
-JWT_ENABLE_BLACKLIST=true
-JWT_BLACKLIST_CLEANUP_INTERVAL_MS=3600000      # 1 hour
-JWT_SECRET_ROTATION_ENABLED=false
-JWT_SECRET_ROTATION_INTERVAL_DAYS=90
+# Cognito Authentication (REQUIRED)
+COGNITO_REGION=us-east-1                       # AWS region for User Pool
+COGNITO_USER_POOL_ID=us-east-1_xxxxxx         # User Pool ID from CDK
+COGNITO_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxx   # Client ID from CDK
 
 # Rate Limiting
 ADMIN_AUTH_RATE_LIMIT_PER_MINUTE=5
@@ -2156,11 +2128,11 @@ SECURITY_LOG_MAX_SIZE=10000
 **Problem:** Tokens are being rejected as invalid
 
 **Solutions:**
-1. Check JWT secret is correctly configured
+1. Check Cognito configuration (User Pool ID, Client ID, Region)
 2. Verify token hasn't expired
-3. Ensure token version matches admin's current version
-4. Check if token has been revoked/blacklisted
-5. Verify issuer and audience claims match configuration
+3. Ensure token was issued by correct Cognito User Pool
+4. Verify network connectivity to Cognito service
+5. Check Cognito User Pool Client configuration
 
 #### Rate Limiting Issues
 

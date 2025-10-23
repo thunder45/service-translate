@@ -103,7 +103,9 @@ AUDIO_MAX_AGE_HOURS=48
 
 #### Security Settings
 ```env
-ENABLE_AUTH=false
+# Authentication is ALWAYS required via Cognito
+# COGNITO_REGION, COGNITO_USER_POOL_ID, COGNITO_CLIENT_ID are required
+
 POLLY_RATE_LIMIT_PER_MINUTE=60
 MAX_CLIENTS_PER_SESSION=50
 ```
@@ -325,7 +327,7 @@ AWS_POLLY_VOICE_ENGINE=neural  # or 'standard'
 ### Network Security
 
 For network deployments, consider:
-- Enabling authentication: `ENABLE_AUTH=true`
+- Cognito authentication (always enabled and required)
 - Setting up firewall rules
 - Using HTTPS (requires additional configuration)
 - Implementing rate limiting

@@ -563,9 +563,9 @@ console.log('Admin sessions:', sessionIds);
 
 ## Migration Guide
 
-### Migrating from JWT to Cognito Authentication
+### Breaking Changes - Cognito Authentication Only
 
-**IMPORTANT**: This system has migrated from custom JWT authentication to AWS Cognito. Existing JWT-based deployments are no longer supported.
+**IMPORTANT**: This system uses **AWS Cognito authentication only**. No local JWT or basic authentication is supported.
 
 ### Setting Up Cognito Authentication
 

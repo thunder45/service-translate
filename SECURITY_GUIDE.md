@@ -17,7 +17,7 @@ This guide covers security features, best practices, and configuration for Servi
 
 Service Translate implements multiple layers of security:
 
-- **Authentication**: Optional basic authentication for admin access
+- **Authentication**: Required AWS Cognito authentication for admin access
 - **Session Security**: Secure session ID generation and validation
 - **Rate Limiting**: Protection against abuse and DoS attacks
 - **Network Security**: CORS configuration and IP-based controls
@@ -216,15 +216,14 @@ sudo ufw allow from 192.168.1.0/24 to any port 8080
 
 ### Local Deployment
 
-Minimal security requirements:
-- Authentication: Optional
+Standard security configuration:
+- Authentication: Cognito authentication (always required)
 - Session IDs: Basic format acceptable
 - Network: Local network only
 - Monitoring: Basic logging
 
 ```env
 DEPLOYMENT_MODE=local
-ENABLE_AUTH=false
 SECURE_SESSION_IDS=false
 WEBSOCKET_CORS_ORIGIN=*
 ```
@@ -232,14 +231,13 @@ WEBSOCKET_CORS_ORIGIN=*
 ### Network Deployment
 
 Enhanced security for LAN access:
-- Authentication: Recommended
+- Authentication: Cognito authentication (always required)
 - Session IDs: Secure format recommended
 - Network: Restricted CORS
 - Monitoring: Enhanced logging
 
 ```env
 DEPLOYMENT_MODE=network
-ENABLE_AUTH=true
 SECURE_SESSION_IDS=true
 WEBSOCKET_CORS_ORIGIN=http://192.168.1.0/24
 ```
@@ -247,7 +245,7 @@ WEBSOCKET_CORS_ORIGIN=http://192.168.1.0/24
 ### Cloud Deployment
 
 Maximum security for internet access:
-- Authentication: Required
+- Authentication: Cognito authentication (always required)
 - Session IDs: Secure format required
 - Network: Strict CORS policy
 - Monitoring: Full audit logging
@@ -255,7 +253,6 @@ Maximum security for internet access:
 
 ```env
 DEPLOYMENT_MODE=cloud
-ENABLE_AUTH=true
 SECURE_SESSION_IDS=true
 WEBSOCKET_CORS_ORIGIN=https://yourdomain.com
 ```

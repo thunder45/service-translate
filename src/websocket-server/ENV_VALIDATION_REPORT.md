@@ -1,26 +1,33 @@
 # WebSocket Server Environment Variables Validation Report
 
-**Generated:** 2025-10-18
+**Generated:** 2025-10-23 (Updated for Cognito Authentication)
 
 ## Executive Summary
 
-This report compares the `.env.example` and actual `.env` files for the websocket server, and validates whether all documented environment variables are actually implemented and used in the codebase.
+This report validates the current WebSocket server environment variables after the migration to AWS Cognito authentication, comparing documented variables in `.env.example` with actual implementation and usage.
 
 ## Key Findings
 
-### ✅ Properly Implemented Variables (21/26)
-The majority of variables in `.env.example` are correctly implemented and used.
+### ✅ Properly Implemented Variables (Core Functionality)
+Essential variables for Cognito authentication and basic server operation are correctly implemented.
 
-### ⚠️ Documented But Not Implemented (5/26)
-Five variables in `.env.example` are documented but their values are **hardcoded** in the implementation:
-- `ADMIN_IDENTITY_CLEANUP_ENABLED`
-- `ADMIN_IDENTITY_RETENTION_DAYS`
-- `ADMIN_IDENTITY_CLEANUP_INTERVAL_MS`
-- `SESSION_CLEANUP_ENABLED`
-- `SESSION_CLEANUP_INTERVAL_MS`
+### ⚠️ Implementation Gaps (Hardcoded Values)  
+Several documented variables are **hardcoded in implementation** rather than reading from environment:
+- `ADMIN_IDENTITY_CLEANUP_ENABLED` - Always enabled (hardcoded)
+- `ADMIN_IDENTITY_RETENTION_DAYS` - Fixed at 90 days (hardcoded)
+- `ADMIN_IDENTITY_CLEANUP_INTERVAL_MS` - Fixed at 24 hours (hardcoded)
+- `SESSION_CLEANUP_ENABLED` - Always enabled (hardcoded)
+- `SESSION_CLEANUP_INTERVAL_MS` - Fixed at 1 hour (hardcoded)
+- `ADMIN_IDENTITIES_DIR` - Hardcoded path ignores environment variable
 
-### ⚠️ Variables in Actual .env But Not in Example
-- `LOG_LEVEL` - Present in actual `.env` but **not documented** in `.env.example` and **not used** in code
+### ⚠️ Deprecated Variables Removed
+Deprecated authentication variables removed from `.env.example`:
+- `ENABLE_AUTH` - No longer supported (authentication always required)
+- `AUTH_USERNAME` - Replaced by Cognito authentication
+- `AUTH_PASSWORD` - Replaced by Cognito authentication
+
+### ⚠️ Variables Present But Not Used
+- `LOG_LEVEL` - Present in actual `.env` but **not used** in code
 
 ---
 
@@ -30,12 +37,14 @@ Five variables in `.env.example` are documented but their values are **hardcoded
 
 | Variable | In Example | In Actual | Used in Code | Status |
 |----------|-----------|-----------|--------------|--------|
-| `PORT` | ✅ | ✅ | ✅ | ✅ Valid |
+| `WS_PORT` | ✅ | ✅ | ✅ | ✅ Valid |
 
 **Implementation:** `src/websocket-server/src/server.ts:702`
 ```typescript
-const PORT = parseInt(process.env.PORT || '3001', 10);
+const WS_PORT = parseInt(process.env.WS_PORT || '3001', 10);
 ```
+
+**Note:** Variable name changed from `PORT` to `WS_PORT` for consistency with other components.
 
 ---
 
@@ -129,20 +138,23 @@ const pollyService = new PollyService({
 
 ---
 
-### 5. Security Configuration (Optional)
+### 5. Deprecated Security Configuration (REMOVED)
 
 | Variable | In Example | In Actual | Used in Code | Status |
 |----------|-----------|-----------|--------------|--------|
-| `ENABLE_AUTH` | ✅ | ❌ | ✅ | ⚠️ Missing in actual |
-| `AUTH_USERNAME` | ✅ | ❌ | ✅ | ⚠️ Missing in actual |
-| `AUTH_PASSWORD` | ✅ | ❌ | ✅ | ⚠️ Missing in actual |
+| `ENABLE_AUTH` | ❌ | ❌ | ❌ | ✅ **DEPRECATED** |
+| `AUTH_USERNAME` | ❌ | ❌ | ❌ | ✅ **DEPRECATED** |
+| `AUTH_PASSWORD` | ❌ | ❌ | ❌ | ✅ **DEPRECATED** |
 
-**Implementation:** `src/websocket-server/src/server.ts:132-138` and `183-193`
+**Status:** These variables have been **completely removed** from the system. Authentication is now **always required** via AWS Cognito. No local authentication is supported.
+
+**Previous Implementation (REMOVED):**
 ```typescript
+// This code has been removed - no longer supported
 const authConfig: AuthConfig = {
-  enabled: process.env.ENABLE_AUTH === 'true',
-  username: process.env.AUTH_USERNAME,
-  password: process.env.AUTH_PASSWORD,
+  enabled: process.env.ENABLE_AUTH === 'true',  // REMOVED
+  username: process.env.AUTH_USERNAME,          // REMOVED
+  password: process.env.AUTH_PASSWORD,          // REMOVED
   sessionTimeout: 24 * 60 * 60 * 1000
 };
 ```
@@ -291,16 +303,16 @@ rateLimit: {
 
 ## Summary Table
 
-| Category | Total | Used | Not Used | Missing from Actual |
-|----------|-------|------|----------|-------------------|
-| Cognito Auth | 3 | 3 | 0 | 0 |
-| Admin Identity | 4 | 1 | 3 | 0 |
-| TTS Config | 4 | 4 | 0 | 4 |
-| Security | 3 | 3 | 0 | 3 |
-| Session Config | 8 | 5 | 3 | 5 |
-| Rate Limiting | 3 | 3 | 0 | 3 |
-| Server | 1 | 1 | 0 | 0 |
-| **TOTAL** | **26** | **20** | **6** | **15** |
+| Category | Total | Used | Not Used | Missing from Actual | Status |
+|----------|-------|------|----------|---------------------|---------|
+| Server Config | 1 | 1 | 0 | 0 | ✅ Complete |
+| Cognito Auth | 3 | 3 | 0 | 0 | ✅ Complete |
+| Admin Identity | 4 | 1 | 3 | 0 | ⚠️ Hardcoded Values |
+| TTS Config | 4 | 4 | 0 | 4 | ⚠️ Optional Variables |
+| Session Config | 8 | 5 | 3 | 5 | ⚠️ Mixed Implementation |
+| Rate Limiting | 3 | 3 | 0 | 3 | ⚠️ Optional Variables |
+| Deprecated Auth | 3 | 0 | 0 | 0 | ✅ Properly Removed |
+| **TOTAL** | **26** | **17** | **6** | **12** | **65% Complete** |
 
 ---
 

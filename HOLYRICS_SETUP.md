@@ -11,7 +11,7 @@ Your Service Translate app now integrates directly with Holyrics to display real
 1. **Open Holyrics** on the computer connected to your projector
 2. **Go to Menu → Configurações → API Server** (File → Settings → API Server)
 3. **Enable the API Server** by checking the box
-4. **Note the IP address and port** (default is usually port 8091)
+4. **Note the IP address and port** (default is port 8091)
 5. **Click "Gerenciar Permissões"** (Manage Permissions) to create an access token
 6. **Copy the generated token** - you'll need this for configuration
 
@@ -78,10 +78,10 @@ When you start streaming:
 
 ### Connection Issues
 - ✅ **Check IP address**: Verify Holyrics computer's IP
-- ✅ **Check port**: Default is 8080, verify in Holyrics settings
+- ✅ **Check port**: Default is 8091, verify in Holyrics settings
 - ✅ **Check token**: Regenerate token in Holyrics if needed
-- ✅ **Check firewall**: Ensure port 8080 is open
-- ✅ **Test manually**: Try `http://IP:8080/api/SetTextCP?token=TOKEN` in browser
+- ✅ **Check firewall**: Ensure port 8091 is open
+- ✅ **Test manually**: Try `http://IP:8091/api/SetTextCP?token=TOKEN` in browser
 
 ### Display Issues
 - ✅ **Check language**: Verify correct display language selected
@@ -99,7 +99,7 @@ When you start streaming:
 Holyrics Settings:
 ✅ Enable Holyrics Integration: ON
 📍 Holyrics Host: 192.168.1.100
-🔌 Holyrics Port: 8080
+🔌 Holyrics Port: 8091
 🔑 API Token: abc123def456
 🌍 Display Language: pt (Source Language)
 📄 Max Lines on Screen: 3

@@ -53,6 +53,8 @@ COGNITO_USER_POOL_ID=us-east-1_xxxxxx              # Cognito User Pool ID
 COGNITO_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxx        # Cognito User Pool Client ID
 ```
 
+**Note**: The WebSocket server now uses **WS_PORT** instead of PORT for consistency with other components.
+
 ### Getting Configuration Values
 
 #### Option 1: From CDK Deployment Output
