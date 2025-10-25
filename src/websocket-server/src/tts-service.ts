@@ -102,11 +102,13 @@ export class TTSService {
       { language: 'it', neural: 'Bianca', standard: 'Carla' }
     ];
 
-    this.loadAvailableVoices();
+    // Note: Voice loading is now lazy (on-demand) to avoid credential issues at startup
+    // The service will work with default voice mappings until voices are explicitly loaded
   }
 
   /**
-   * Load available voices from AWS Polly
+   * Load available voices from AWS Polly (lazy loading, requires proper credentials)
+   * This is optional - the service works with default voice mappings
    */
   private async loadAvailableVoices(): Promise<void> {
     try {
@@ -121,7 +123,9 @@ export class TTSService {
         this.updateVoiceMappings();
       }
     } catch (error) {
-      console.error('Failed to load available Polly voices:', error);
+      // This is expected if using local credentials without Polly permissions
+      // The service will continue to work with default voice mappings
+      console.log('Voice discovery skipped (using default voice mappings)');
     }
   }
 
