@@ -54,12 +54,14 @@ export class ServiceTranslateStack extends cdk.Stack {
         },
       }, 'sts:AssumeRoleWithWebIdentity'),
       inlinePolicies: {
-        TranscribeTranslateAccess: new iam.PolicyDocument({
+        TranscribeTranslatePollyAccess: new iam.PolicyDocument({
           statements: [
             new iam.PolicyStatement({
               actions: [
                 'transcribe:StartStreamTranscription',
                 'translate:TranslateText',
+                'polly:SynthesizeSpeech',
+                'polly:DescribeVoices',
               ],
               resources: ['*'],
             }),

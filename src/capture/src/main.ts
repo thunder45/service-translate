@@ -120,28 +120,72 @@ ipcMain.handle('get-audio-devices', async () => {
     const isWindows = platform() === 'win32';
     
     if (isWindows) {
-      // Windows: Use PowerShell to enumerate audio devices
+      // Windows: Use PowerShell to enumerate RECORDING devices specifically
       const psCommand = `
-        Get-WmiObject -Class Win32_SoundDevice | 
-        Where-Object { $_.Status -eq 'OK' } | 
-        Select-Object -ExpandProperty Name
-      `;
+        Add-Type -TypeDefinition @"
+        using System;
+        using System.Runtime.InteropServices;
+        public class AudioDeviceEnumerator {
+            [DllImport("winmm.dll", CharSet = CharSet.Auto)]
+            public static extern int waveInGetNumDevs();
+            
+            [DllImport("winmm.dll", CharSet = CharSet.Auto)]
+            public static extern int waveInGetDevCaps(IntPtr deviceId, ref WAVEINCAPS wic, int size);
+            
+            [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+            public struct WAVEINCAPS {
+                public ushort wMid;
+                public ushort wPid;
+                public uint vDriverVersion;
+                [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+                public string szPname;
+                public uint dwFormats;
+                public ushort wChannels;
+                public ushort wReserved1;
+            }
+            
+            public static string[] GetRecordingDevices() {
+                int deviceCount = waveInGetNumDevs();
+                string[] devices = new string[deviceCount];
+                
+                for (int i = 0; i < deviceCount; i++) {
+                    WAVEINCAPS wic = new WAVEINCAPS();
+                    if (waveInGetDevCaps(new IntPtr(i), ref wic, Marshal.SizeOf(wic)) == 0) {
+                        devices[i] = wic.szPname;
+                    }
+                }
+                return devices;
+            }
+        }
+"@
+        [AudioDeviceEnumerator]::GetRecordingDevices() | ForEach-Object { $_ }
+      `.replace(/\n/g, ' ');
       
       try {
-        const { stdout } = await execAsync(`powershell -Command "${psCommand}"`);
+        const { stdout } = await execAsync(`powershell -NoProfile -Command "${psCommand}"`, {
+          timeout: 10000,
+          maxBuffer: 1024 * 1024
+        });
+        
         const devices = [{ id: 'default', name: 'Default System Input' }];
         
         const deviceNames = stdout.trim().split('\n').filter((line: string) => line.trim());
+        console.log('Windows recording devices found:', deviceNames);
+        
         deviceNames.forEach((name: string, index: number) => {
-          devices.push({ 
-            id: index.toString(), 
-            name: name.trim() 
-          });
+          const trimmedName = name.trim();
+          if (trimmedName) {
+            devices.push({ 
+              id: index.toString(), 
+              name: trimmedName
+            });
+          }
         });
         
         return devices;
       } catch (error) {
         console.error('Windows audio device enumeration failed:', error);
+        console.log('Falling back to default device only');
         return [{ id: 'default', name: 'Default System Input' }];
       }
     } else {

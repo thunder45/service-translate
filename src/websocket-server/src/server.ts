@@ -9,6 +9,8 @@ import { AudioManager } from './audio-manager';
 import { ServerErrorLogger } from './error-logger';
 import { SecurityMiddleware, SecurityConfig } from './security-middleware';
 import { PollyService } from './polly-service';
+import { TTSService } from './tts-service';
+import { TTSFallbackManager } from './tts-fallback-manager';
 import { AdminIdentityStore } from './admin-identity-store';
 import { AdminIdentityManager } from './admin-identity-manager';
 import { AuthManager, AuthConfig } from './auth-manager';
@@ -161,6 +163,18 @@ const pollyService = new PollyService({
   enabled: process.env.ENABLE_TTS === 'true'
 });
 
+// Initialize TTS Service (wraps PollyClient with caching and optimization)
+// TTSService creates its own PollyClient, AudioCacheManager, and AudioOptimizer internally
+const ttsService = new TTSService({
+  region: process.env.AWS_REGION || 'us-east-1',
+  voiceType: 'neural',
+  outputFormat: 'mp3',
+  sampleRate: '22050'
+});
+
+// Initialize TTS Fallback Manager (provides intelligent fallback chain)
+const ttsFallbackManager = new TTSFallbackManager(ttsService);
+
 // Initialize security middleware
 const securityConfig: SecurityConfig = {
   auth: {
@@ -259,16 +273,16 @@ const io = new SocketIOServer(server, {
 });
 
 // Initialize message router with all dependencies
-const messageRouter = new MessageRouter(
-  io,
-  sessionManager,
-  authManager,
-  adminIdentityManager,
-  cognitoAuth,
-  audioManager,
-  errorLogger,
-  pollyService
-);
+  const messageRouter = new MessageRouter(
+    io,
+    sessionManager,
+    authManager,
+    adminIdentityManager,
+    cognitoAuth,
+    audioManager,
+    errorLogger,
+    ttsFallbackManager
+  );
 
 const WS_PORT = parseInt(process.env.WS_PORT || '3001', 10);
 

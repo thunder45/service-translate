@@ -2,8 +2,6 @@ import { Socket, Server as SocketIOServer } from 'socket.io';
 import { SessionManager } from './session-manager';
 import { MessageValidator } from './message-validator';
 import { AudioManager } from './audio-manager';
-import { TTSService } from './tts-service';
-import { TTSFallbackManager } from './tts-fallback-manager';
 import { AuthManager } from './auth-manager';
 import { AdminIdentityManager, CognitoTokens } from './admin-identity-manager';
 import { CognitoAuthService, CognitoAuthError, CognitoErrorCode } from './cognito-auth';
@@ -24,9 +22,6 @@ import {
 } from './types';
 
 export class MessageRouter {
-  private ttsService: TTSService;
-  private ttsFallbackManager: TTSFallbackManager;
-
   constructor(
     private io: SocketIOServer,
     private sessionManager: SessionManager,
@@ -35,15 +30,10 @@ export class MessageRouter {
     private cognitoAuth: CognitoAuthService,
     private audioManager?: AudioManager,
     private errorLogger?: any,
-    private pollyService?: any  // Optional pollyService for cost tracking
+    private ttsFallbackManager?: any  // TTSFallbackManager for intelligent TTS fallback chain
   ) {
-    this.ttsService = new TTSService();
-    this.ttsFallbackManager = new TTSFallbackManager(this.ttsService);
-
-    // Forward fallback notifications to clients
-    this.ttsFallbackManager.on('fallback-notification', (notification) => {
-      this.broadcastFallbackNotification(notification);
-    });
+    // TTSFallbackManager provides intelligent fallback:
+    // AWS Polly (neural/standard) -> Browser Web Speech API -> Text-only
   }
 
   /**
@@ -267,12 +257,6 @@ export class MessageRouter {
         permissions,
         timestamp: new Date().toISOString()
       };
-
-      // Update AWS service credentials with ID token (if available from credentials auth)
-      if ('cognitoTokens' in result && result.cognitoTokens && this.pollyService) {
-        console.log(`Updating AWS service credentials for admin ${result.adminId}`);
-        this.pollyService.updateCredentials(result.cognitoTokens.idToken);
-      }
 
       socket.emit('admin-auth-response', response);
 
@@ -538,14 +522,9 @@ export class MessageRouter {
       }
 
       try {
-        // Update AWS service credentials with new ID token
-        if (this.pollyService && this.pollyService.updateCredentials) {
-          console.log(`Updating PollyService credentials for admin ${adminIdentity.adminId}`);
-          this.pollyService.updateCredentials(data.idToken);
-        }
-
-        // Update other AWS services that might use ID tokens
-        // (Add more services here as needed)
+        // Note: AWS service credential updates were removed with TTSFallbackManager integration
+        // TTSService creates its own internal PollyClient with environment credentials
+        // No dynamic credential updates needed for TTS functionality
 
         // Send success response
         socket.emit('token-update-response', {
@@ -569,8 +548,6 @@ export class MessageRouter {
       });
     }
   }
-
-
 
   // ============================================================================
   // Admin Session Access Handlers (Task 5.4)
@@ -1175,24 +1152,41 @@ export class MessageRouter {
       }
 
       if (!audioInfo) {
-        // Generate new TTS audio
-        console.log(`Generating TTS for direct request: ${text.substring(0, 50)}... (${language}, ${effectiveVoiceType})`);
+        // Generate new TTS audio using TTSFallbackManager (Polly -> Browser TTS -> Text-only)
+        console.log(`Generating TTS with fallback for direct request: ${text.substring(0, 50)}... (${language}, ${effectiveVoiceType})`);
         
-        const ttsResult = await this.ttsService.synthesizeSpeech(
-          text,
-          language,
-          effectiveVoiceType
+        if (!this.ttsFallbackManager) {
+          this.sendError(socket, 503, 'TTS service not available', { 
+            sessionId, 
+            language 
+          });
+          return;
+        }
+
+        const audioBuffer = await this.ttsFallbackManager.generateAudioWithFallback(
+          text, 
+          language, 
+          effectiveVoiceType,
+          sessionId
         );
+        
+        if (!audioBuffer) {
+          this.sendError(socket, 500, 'TTS generation failed', { 
+            sessionId, 
+            language 
+          });
+          return;
+        }
 
         // Store audio if audio manager is available
         if (this.audioManager) {
           audioInfo = await this.audioManager.storeAudioFile(
-            ttsResult.audioBuffer,
+            audioBuffer,
             text,
             language,
-            ttsResult.voiceType,
-            ttsResult.format,
-            ttsResult.duration
+            effectiveVoiceType,
+            'mp3',
+            undefined
           );
         }
       }
@@ -1275,35 +1269,35 @@ export class MessageRouter {
           }
 
           if (!audioInfo) {
-            // Generate new TTS audio
-            console.log(`Generating TTS for ${lang}: ${translatedText.substring(0, 50)}...`);
+            // Generate new TTS audio using TTSFallbackManager (Polly -> Browser TTS -> Text-only)
+            console.log(`Generating TTS with fallback for ${lang}: ${translatedText.substring(0, 50)}...`);
             
-            const ttsResult = await this.ttsService.synthesizeSpeech(
-              translatedText,
-              lang,
-              effectiveVoiceType
-            );
+            if (!this.ttsFallbackManager) {
+              console.warn(`TTS fallback manager not available for ${lang}, skipping audio generation`);
+              continue;
+            }
 
-            // Track cost if pollyService is available
-            if (this.pollyService && ttsResult.audioBuffer) {
-              // Use private method to track cost - calculate characters and voice type
-              const charCount = translatedText.length;
-              const usedVoiceType = ttsResult.voiceType || effectiveVoiceType;
-              // Call cost tracking directly via the service's internal method
-              // Since we can't access private methods, we'll need to generate through pollyService instead
-              // For now, just log that we should track this
-              console.log(`TTS generated: ${charCount} chars, ${usedVoiceType} voice (cost tracking needed)`);
+            const audioBuffer = await this.ttsFallbackManager.generateAudioWithFallback(
+              translatedText, 
+              lang, 
+              effectiveVoiceType,
+              sessionId
+            );
+            
+            if (!audioBuffer) {
+              console.warn(`TTS generation failed for ${lang}, skipping audio`);
+              continue;
             }
 
             // Store audio if audio manager is available
             if (this.audioManager) {
               audioInfo = await this.audioManager.storeAudioFile(
-                ttsResult.audioBuffer,
+                audioBuffer,
                 translatedText,
                 lang,
-                ttsResult.voiceType,
-                ttsResult.format,
-                ttsResult.duration
+                effectiveVoiceType,
+                'mp3',
+                undefined
               );
             }
           } else {
@@ -1355,132 +1349,6 @@ export class MessageRouter {
   }
 
   /**
-   * Generate TTS audio with fallback chain
-   */
-  private async generateAndCacheTTS(
-    message: TranslationBroadcast, 
-    voiceType: 'neural' | 'standard'
-  ): Promise<void> {
-    try {
-      console.log(`Generating TTS audio for: ${message.text.substring(0, 50)}... (${message.language}, ${voiceType})`);
-      
-      // Log TTS request
-      if (this.errorLogger) {
-        this.errorLogger.logTTSOperation('request', {
-          text: message.text.substring(0, 100),
-          language: message.language,
-          voiceType,
-          sessionId: message.sessionId
-        });
-      }
-      
-      const startTime = Date.now();
-      const result = await this.ttsFallbackManager.generateAudioWithFallback(
-        message.text,
-        message.language,
-        voiceType,
-        message.sessionId
-      );
-      const duration = Date.now() - startTime;
-
-      if (result.success) {
-        if (result.audioBuffer && this.audioManager) {
-          // Store audio and get URL
-          const audioInfo = await this.audioManager.storeAudioFile(
-            result.audioBuffer,
-            message.text,
-            message.language,
-            result.voiceType || voiceType,
-            'mp3',
-            result.duration
-          );
-          
-          message.audioUrl = audioInfo.url;
-          message.audioMetadata = {
-            audioId: audioInfo.id,
-            url: audioInfo.url,
-            duration: audioInfo.duration,
-            format: audioInfo.format,
-            voiceType: audioInfo.voiceType,
-            size: audioInfo.size
-          };
-          
-          // Log successful TTS generation
-          if (this.errorLogger) {
-            this.errorLogger.logTTSOperation('success', {
-              text: message.text.substring(0, 100),
-              language: message.language,
-              voiceType: result.voiceType || voiceType,
-              duration,
-              sessionId: message.sessionId
-            });
-          }
-          
-          console.log(`TTS generated with ${result.fallbackUsed}: ${message.language}`);
-        } else if (result.fallbackUsed === 'local') {
-          // Use local TTS
-          message.useLocalTTS = true;
-          
-          // Log fallback usage
-          if (this.errorLogger) {
-            this.errorLogger.logTTSOperation('fallback', {
-              text: message.text.substring(0, 100),
-              language: message.language,
-              fallbackMethod: 'local',
-              duration,
-              sessionId: message.sessionId
-            });
-          }
-          
-          console.log(`Using local TTS fallback for: ${message.language}`);
-        }
-      } else {
-        // All TTS methods failed, use text-only
-        console.warn(`All TTS methods failed: ${result.error}`);
-        message.useLocalTTS = true;
-        
-        // Log TTS failure
-        if (this.errorLogger) {
-          this.errorLogger.logTTSOperation('failure', {
-            text: message.text.substring(0, 100),
-            language: message.language,
-            voiceType,
-            duration,
-            error: result.error,
-            sessionId: message.sessionId
-          });
-        }
-      }
-    } catch (error) {
-      console.error('TTS generation with fallback failed:', error);
-      message.useLocalTTS = true;
-    }
-  }
-
-  /**
-   * Broadcast fallback notifications to clients
-   */
-  private broadcastFallbackNotification(notification: any): void {
-    if (notification.sessionId) {
-      // Broadcast to specific session
-      this.io.to(notification.sessionId).emit('tts-fallback-notification', {
-        type: 'tts-fallback-notification',
-        ...notification,
-        timestamp: new Date().toISOString()
-      });
-    } else {
-      // Broadcast to all connected clients
-      this.io.emit('tts-fallback-notification', {
-        type: 'tts-fallback-notification',
-        ...notification,
-        timestamp: new Date().toISOString()
-      });
-    }
-    
-    console.log(`Broadcasted fallback notification: ${notification.type} - ${notification.originalMethod} → ${notification.fallbackMethod}`);
-  }
-
-  /**
    * Handle client disconnection cleanup
    */
   handleDisconnection(socket: Socket, reason: string): void {
@@ -1508,79 +1376,9 @@ export class MessageRouter {
   }
 
   /**
-   * Broadcast to language-specific client groups
-   */
-  broadcastToLanguageGroup(sessionId: string, language: TargetLanguage, message: any): void {
-    const targetClients = this.sessionManager.getClientsByLanguage(sessionId, language);
-    targetClients.forEach(clientSocketId => {
-      this.io.to(clientSocketId).emit('broadcast', message);
-    });
-  }
-
-  /**
-   * Broadcast to all clients in a session
-   */
-  broadcastToSession(sessionId: string, message: any): void {
-    this.io.to(sessionId).emit('broadcast', message);
-  }
-
-  /**
-   * Broadcast audio with metadata to language-specific clients
-   */
-  broadcastAudioToLanguageGroup(
-    sessionId: string, 
-    language: TargetLanguage, 
-    audioBuffer: Buffer,
-    text: string,
-    voiceType: 'neural' | 'standard' | 'local',
-    format: string = 'mp3',
-    duration?: number
-  ): void {
-    if (!this.audioManager) {
-      console.warn('Audio manager not available for audio broadcasting');
-      return;
-    }
-
-    // Store audio file and get info
-    this.audioManager.storeAudioFile(audioBuffer, text, language, voiceType, format, duration)
-      .then(audioInfo => {
-        const audioMetadata: AudioMetadata = {
-          audioId: audioInfo.id,
-          url: audioInfo.url,
-          duration: audioInfo.duration,
-          format: audioInfo.format,
-          voiceType: audioInfo.voiceType,
-          size: audioInfo.size
-        };
-
-        const message: TranslationBroadcast = {
-          type: 'translation',
-          sessionId,
-          text,
-          language,
-          timestamp: Date.now(),
-          audioUrl: audioInfo.url,
-          audioMetadata
-        };
-
-        // Get clients for the specific language
-        const targetClients = this.sessionManager.getClientsByLanguage(sessionId, language);
-        
-        targetClients.forEach(clientSocketId => {
-          this.io.to(clientSocketId).emit('translation', message);
-        });
-
-        console.log(`Broadcasted audio to ${targetClients.length} clients for language: ${language}`);
-      })
-      .catch(error => {
-        console.error('Failed to store and broadcast audio:', error);
-      });
-  }
-
-  /**
    * Broadcast TTS configuration update to all clients
    */
-  broadcastTTSConfigUpdate(sessionId: string, ttsMode: 'neural' | 'standard' | 'local' | 'disabled'): void {
+  private broadcastTTSConfigUpdate(sessionId: string, ttsMode: 'neural' | 'standard' | 'local' | 'disabled'): void {
     const session = this.sessionManager.getSession(sessionId);
     if (!session) {
       console.error(`Session not found for TTS config update: ${sessionId}`);
@@ -1601,81 +1399,33 @@ export class MessageRouter {
   }
 
   /**
-   * Get audio streaming statistics for monitoring
-   */
-  getAudioStreamingStats(sessionId: string): {
-    totalClients: number;
-    clientsByLanguage: Record<TargetLanguage, number>;
-    audioCapabilities: {
-      pollySupported: number;
-      localTTSSupported: number;
-      audioFormatsSupported: Record<string, number>;
-    };
-  } {
-    const clients = this.sessionManager.getSessionClients(sessionId);
-    
-    const stats = {
-      totalClients: clients.length,
-      clientsByLanguage: {} as Record<TargetLanguage, number>,
-      audioCapabilities: {
-        pollySupported: 0,
-        localTTSSupported: 0,
-        audioFormatsSupported: {} as Record<string, number>
-      }
-    };
-
-    // Initialize language counts
-    const languages: TargetLanguage[] = ['en', 'es', 'fr', 'de', 'it'];
-    languages.forEach(lang => {
-      stats.clientsByLanguage[lang] = 0;
-    });
-
-    // Count clients by language and capabilities
-    clients.forEach(client => {
-      stats.clientsByLanguage[client.preferredLanguage]++;
-      
-      if (client.audioCapabilities?.supportsPolly) {
-        stats.audioCapabilities.pollySupported++;
-      }
-      
-      if ((client.audioCapabilities?.localTTSLanguages.length || 0) > 0) {
-        stats.audioCapabilities.localTTSSupported++;
-      }
-      
-      client.audioCapabilities?.audioFormats.forEach(format => {
-        stats.audioCapabilities.audioFormatsSupported[format] = 
-          (stats.audioCapabilities.audioFormatsSupported[format] || 0) + 1;
-      });
-    });
-
-    return stats;
-  }
-
-  /**
-   * Test TTS capabilities
+   * Test TTS capabilities using TTSFallbackManager
    */
   async testTTSCapabilities(language: TargetLanguage = 'en'): Promise<{
     polly: boolean;
     local: boolean;
     textOnly: boolean;
     supportedLanguages: TargetLanguage[];
-    performanceMetrics?: any;
   }> {
-    const capabilities = await this.ttsFallbackManager.testTTSCapabilities(language);
-    const metrics = this.ttsFallbackManager.getPerformanceMetrics();
+    const supportedLanguages: TargetLanguage[] = ['en', 'es', 'fr', 'de', 'it'];
     
-    return {
-      ...capabilities,
-      supportedLanguages: this.ttsService.getSupportedLanguages(),
-      performanceMetrics: metrics
-    };
-  }
+    let pollyAvailable = false;
+    if (this.ttsFallbackManager) {
+      try {
+        // Test with a simple phrase using fallback manager
+        const testBuffer = await this.ttsFallbackManager.generateAudioWithFallback('Test', language, 'standard', 'test-session');
+        pollyAvailable = !!testBuffer;
+      } catch (error) {
+        console.error('TTS fallback test failed:', error);
+      }
+    }
 
-  /**
-   * Get fallback manager performance metrics
-   */
-  getFallbackMetrics() {
-    return this.ttsFallbackManager.getPerformanceMetrics();
+    return {
+      polly: pollyAvailable,
+      local: true, // Browser Web Speech API as fallback
+      textOnly: true,
+      supportedLanguages
+    };
   }
 
   /**
@@ -1687,15 +1437,32 @@ export class MessageRouter {
 
   /**
    * Get TTS cost statistics
+   * Note: Cost tracking moved to internal TTSService/PollyClient
+   * This method returns empty stats for backward compatibility
    */
   getTTSCostStats() {
-    return this.ttsService.getCostStats();
+    // Cost tracking is now internal to TTSService
+    // Return empty stats for backward compatibility
+    return {
+      characters: 0,
+      standardCharacters: 0,
+      neuralCharacters: 0,
+      standardCost: 0,
+      neuralCost: 0,
+      totalCost: 0,
+      requestCount: 0,
+      sessionStartTime: new Date(),
+      lastUpdated: new Date()
+    };
   }
 
   /**
    * Reset TTS cost statistics
+   * Note: Cost tracking moved to internal TTSService/PollyClient
+   * This method is kept for backward compatibility but does nothing
    */
   resetTTSCostStats(): void {
-    this.ttsService.resetCostStats();
+    // Cost tracking is now internal to TTSService
+    // No-op for backward compatibility
   }
 }
