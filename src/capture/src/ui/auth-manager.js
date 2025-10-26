@@ -85,7 +85,7 @@
                         if (connectResult.success) {
                             await new Promise(resolve => setTimeout(resolve, 500));
                             const wsAuthResult = await window.electronAPI.adminAuthenticateWithToken({ 
-                                token: result.accessToken 
+                                token: result.idToken  // Use ID token for AWS Cognito Identity Pool authentication
                             });
                             
                             if (wsAuthResult.success) {
@@ -413,18 +413,18 @@
      * Used for both startup (with stored tokens) and manual reconnection
      * Uses existing checkWebSocketServerStatus() - does not reimplement health check
      * 
-     * @param {string} accessToken - Optional access token for WebSocket auth, if not provided will use current auth state
+     * @param {string} idToken - Optional ID token for WebSocket auth, if not provided will use current auth state
      */
-    async function connectAndAuthenticate(accessToken) {
+    async function connectAndAuthenticate(idToken) {
         try {
-            // If no access token provided, get it from current auth state
-            if (!accessToken) {
-                if (!adminAuthState.accessToken) {
-                    console.error('No access token available for WebSocket authentication');
+            // If no ID token provided, get it from current auth state
+            if (!idToken) {
+                if (!adminAuthState.idToken) {
+                    console.error('No ID token available for WebSocket authentication');
                     window.uiManager.showStatus('⚠️ Please login first', 'warning');
                     return;
                 }
-                accessToken = adminAuthState.accessToken;
+                idToken = adminAuthState.idToken;
             }
 
             window.uiManager.showStatus('Connecting to WebSocket server...', 'info');
@@ -455,7 +455,7 @@
             // Authenticate with ID token for WebSocket server (needed for AWS Cognito Identity Pool)
             console.log('Authenticating with ID token...');
             const wsAuthResult = await window.electronAPI.adminAuthenticateWithToken({ 
-                token: accessToken  // This is actually idToken parameter name - contains ID token
+                token: idToken  // ID token needed for AWS service authentication via Cognito Identity Pool
             });
 
             if (wsAuthResult.success) {
