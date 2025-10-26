@@ -1,4 +1,5 @@
 import { PollyClient, SynthesizeSpeechCommand, Voice, DescribeVoicesCommand, VoiceId } from '@aws-sdk/client-polly';
+import { fromCognitoIdentityPool } from '@aws-sdk/credential-providers';
 import { TargetLanguage } from './types';
 import { AudioCacheManager, CacheEntry } from './audio-cache-manager';
 import { AudioOptimizer, OptimizedAudio, VoiceOptimizationProfile } from './audio-optimizer';
@@ -8,6 +9,9 @@ export interface TTSConfig {
   voiceType: 'neural' | 'standard';
   outputFormat: 'mp3' | 'ogg_vorbis' | 'pcm';
   sampleRate: string;
+  jwtToken?: string;
+  identityPoolId?: string;
+  userPoolId?: string;
 }
 
 export interface VoiceMapping {
@@ -37,7 +41,7 @@ export interface TTSCostStats {
 }
 
 export class TTSService {
-  private pollyClient: PollyClient;
+  private pollyClient: PollyClient | null = null;
   private config: TTSConfig;
   private voiceMappings: VoiceMapping[];
   private availableVoices: Voice[] = [];
@@ -58,7 +62,9 @@ export class TTSService {
     sampleRate: '22050'
   }) {
     this.config = config;
-    this.pollyClient = new PollyClient({ region: config.region });
+    
+    // Initialize Polly client with Cognito credentials if available
+    this.initializeClient();
     
     // Initialize cost tracking
     this.costStats = {
@@ -107,10 +113,55 @@ export class TTSService {
   }
 
   /**
+   * Initialize Polly client with Cognito credentials
+   */
+  private initializeClient(): void {
+    if (!this.config.jwtToken || !this.config.identityPoolId || !this.config.userPoolId) {
+      console.warn('TTSService: Cognito credentials not provided, TTS will not be available');
+      this.pollyClient = null;
+      return;
+    }
+
+    try {
+      this.pollyClient = new PollyClient({
+        region: this.config.region,
+        credentials: fromCognitoIdentityPool({
+          clientConfig: { region: this.config.region },
+          identityPoolId: this.config.identityPoolId,
+          logins: {
+            [`cognito-idp.${this.config.region}.amazonaws.com/${this.config.userPoolId}`]: this.config.jwtToken,
+          },
+        }),
+      });
+      console.log('TTSService: Polly client initialized with Cognito credentials');
+    } catch (error) {
+      console.error('TTSService: Failed to initialize Polly client:', error);
+      this.pollyClient = null;
+    }
+  }
+
+  /**
+   * Update credentials and reinitialize client
+   */
+  updateCredentials(jwtToken: string, identityPoolId?: string, userPoolId?: string): void {
+    this.config.jwtToken = jwtToken;
+    if (identityPoolId) this.config.identityPoolId = identityPoolId;
+    if (userPoolId) this.config.userPoolId = userPoolId;
+    
+    this.initializeClient();
+    console.log('TTSService: Credentials updated');
+  }
+
+  /**
    * Load available voices from AWS Polly (lazy loading, requires proper credentials)
    * This is optional - the service works with default voice mappings
    */
   private async loadAvailableVoices(): Promise<void> {
+    if (!this.pollyClient) {
+      console.log('Voice discovery skipped (Polly client not initialized)');
+      return;
+    }
+
     try {
       const command = new DescribeVoicesCommand({});
       const response = await this.pollyClient.send(command);
@@ -194,6 +245,10 @@ export class TTSService {
     voiceType: 'neural' | 'standard' = this.config.voiceType,
     optimizeForMobile: boolean = true
   ): Promise<TTSResult & { optimized?: OptimizedAudio }> {
+    if (!this.pollyClient) {
+      throw new Error('TTSService: Polly client not initialized. Please provide Cognito credentials.');
+    }
+
     if (!text || text.trim().length === 0) {
       throw new Error('Text cannot be empty');
     }
@@ -331,10 +386,9 @@ export class TTSService {
   updateConfig(newConfig: Partial<TTSConfig>): void {
     this.config = { ...this.config, ...newConfig };
     
-    // Recreate Polly client if region changed
-    if (newConfig.region) {
-      this.pollyClient = new PollyClient({ region: newConfig.region });
-      this.loadAvailableVoices();
+    // Reinitialize client if credentials or region changed
+    if (newConfig.region || newConfig.jwtToken || newConfig.identityPoolId || newConfig.userPoolId) {
+      this.initializeClient();
     }
     
     console.log('TTS config updated:', this.config);

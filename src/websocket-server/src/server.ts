@@ -165,15 +165,22 @@ const pollyService = new PollyService({
 
 // Initialize TTS Service (wraps PollyClient with caching and optimization)
 // TTSService creates its own PollyClient, AudioCacheManager, and AudioOptimizer internally
+// Note: Starts without JWT token; credentials will be updated when admin authenticates
 const ttsService = new TTSService({
   region: process.env.AWS_REGION || 'us-east-1',
   voiceType: 'neural',
   outputFormat: 'mp3',
-  sampleRate: '22050'
+  sampleRate: '22050',
+  identityPoolId: process.env.AWS_IDENTITY_POOL_ID || '',
+  userPoolId: process.env.COGNITO_USER_POOL_ID || ''
+  // jwtToken will be provided when admin authenticates
 });
 
 // Initialize TTS Fallback Manager (provides intelligent fallback chain)
 const ttsFallbackManager = new TTSFallbackManager(ttsService);
+
+// Export ttsService so MessageRouter can update credentials when admin authenticates
+export { ttsService };
 
 // Initialize security middleware
 const securityConfig: SecurityConfig = {
