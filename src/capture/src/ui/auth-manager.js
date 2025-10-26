@@ -394,9 +394,9 @@
                 // Show status
                 window.uiManager.showStatus(`✅ Reconnected as ${stored.username}`, 'success');
 
-                // Start WebSocket connection flow (use access token for WebSocket auth)
+                // Start WebSocket connection flow (use ID token for WebSocket auth)
                 if (window.websocketManager) {
-                    await connectAndAuthenticate(stored.accessToken);
+                    await connectAndAuthenticate(stored.idToken);
                 }
 
                 return true;
@@ -452,10 +452,10 @@
             // Wait for connection to establish
             await new Promise(resolve => setTimeout(resolve, 1000));
 
-            // Authenticate with access token for WebSocket server
-            console.log('Authenticating with access token...');
+            // Authenticate with ID token for WebSocket server (needed for AWS Cognito Identity Pool)
+            console.log('Authenticating with ID token...');
             const wsAuthResult = await window.electronAPI.adminAuthenticateWithToken({ 
-                token: accessToken  // WebSocket server expects access token
+                token: accessToken  // This is actually idToken parameter name - contains ID token
             });
 
             if (wsAuthResult.success) {
