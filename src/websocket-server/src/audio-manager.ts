@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
-import { writeFileSync, readFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'fs';
-import { join, extname } from 'path';
+import * as fs from 'fs';
+import * as path from 'path';
 import { TargetLanguage } from './types';
 
 export interface AudioFileInfo {
@@ -59,16 +59,28 @@ export class AudioManager {
    * Store audio file and return file info
    */
   async storeAudioFile(
-    audioBuffer: Buffer,
+    audioData: any,
     text: string,
     language: TargetLanguage,
     voiceType: 'neural' | 'standard' | 'local',
     format: string = 'mp3',
     duration?: number
   ): Promise<AudioFileInfo> {
+    // Add debug logging
+    console.log('Debug - Audio data received:', {
+        type: typeof audioData,
+        isBuffer: Buffer.isBuffer(audioData),
+        keys: audioData && typeof audioData === 'object' ? Object.keys(audioData) : null,
+        hasAudioStream: audioData?.AudioStream ? 'yes' : 'no',
+        audioStreamType: audioData?.AudioStream ? typeof audioData.AudioStream : null,
+        preview: audioData && typeof audioData === 'object' 
+            ? JSON.stringify(audioData).slice(0, 200) 
+            : String(audioData).slice(0, 200)
+    });
+
     const audioId = this.generateAudioId(text, language, voiceType);
     const fileName = `${audioId}.${format}`;
-    const filePath = join(this.audioDir, fileName);
+    const filePath = path.join(this.audioDir, fileName);
     
     // Check if file already exists
     if (this.cacheIndex.has(audioId)) {
@@ -78,8 +90,9 @@ export class AudioManager {
       return existing;
     }
 
-    // Write audio file
-    writeFileSync(filePath, audioBuffer);
+    // Normalize and write audio file
+    const audioBuffer = normalizeToBuffer(audioData);
+    fs.writeFileSync(filePath, audioBuffer);
 
     // Create file info
     const audioInfo: AudioFileInfo = {
@@ -111,7 +124,7 @@ export class AudioManager {
     const audioId = this.generateAudioId(text, language, voiceType);
     const audioInfo = this.cacheIndex.get(audioId);
     
-    if (audioInfo && existsSync(audioInfo.filePath)) {
+    if (audioInfo && fs.existsSync(audioInfo.filePath)) {
       // Update last accessed time
       audioInfo.lastAccessed = new Date();
       this.saveCacheIndex();
@@ -133,7 +146,7 @@ export class AudioManager {
   getAudioById(audioId: string): AudioFileInfo | null {
     const audioInfo = this.cacheIndex.get(audioId);
     
-    if (audioInfo && existsSync(audioInfo.filePath)) {
+    if (audioInfo && fs.existsSync(audioInfo.filePath)) {
       audioInfo.lastAccessed = new Date();
       this.saveCacheIndex();
       return audioInfo;
@@ -161,10 +174,10 @@ export class AudioManager {
   getAudioBuffer(audioId: string): Buffer | null {
     const audioInfo = this.cacheIndex.get(audioId);
     
-    if (audioInfo && existsSync(audioInfo.filePath)) {
+    if (audioInfo && fs.existsSync(audioInfo.filePath)) {
       audioInfo.lastAccessed = new Date();
       this.saveCacheIndex();
-      return readFileSync(audioInfo.filePath);
+      return fs.readFileSync(audioInfo.filePath);
     }
 
     return null;
@@ -218,8 +231,8 @@ export class AudioManager {
     const audioInfo = this.cacheIndex.get(audioId);
     if (audioInfo) {
       try {
-        if (existsSync(audioInfo.filePath)) {
-          unlinkSync(audioInfo.filePath);
+        if (fs.existsSync(audioInfo.filePath)) {
+          fs.unlinkSync(audioInfo.filePath);
         }
         this.cacheIndex.delete(audioId);
         console.log(`Deleted audio file: ${audioInfo.filePath}`);
@@ -285,22 +298,22 @@ export class AudioManager {
   // Private methods
 
   private ensureAudioDir(): void {
-    if (!existsSync(this.audioDir)) {
-      mkdirSync(this.audioDir, { recursive: true });
+    if (!fs.existsSync(this.audioDir)) {
+      fs.mkdirSync(this.audioDir, { recursive: true });
       console.log(`Created audio directory: ${this.audioDir}`);
     }
   }
 
   private getCacheIndexPath(): string {
-    return join(this.audioDir, 'cache-index.json');
+    return path.join(this.audioDir, 'cache-index.json');
   }
 
   private loadCacheIndex(): void {
     const indexPath = this.getCacheIndexPath();
     
-    if (existsSync(indexPath)) {
+    if (fs.existsSync(indexPath)) {
       try {
-        const data = JSON.parse(readFileSync(indexPath, 'utf8'));
+        const data = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
         
         for (const [audioId, audioInfo] of Object.entries(data)) {
           this.cacheIndex.set(audioId, {
@@ -321,7 +334,7 @@ export class AudioManager {
     try {
       const indexPath = this.getCacheIndexPath();
       const data = Object.fromEntries(this.cacheIndex.entries());
-      writeFileSync(indexPath, JSON.stringify(data, null, 2));
+      fs.writeFileSync(indexPath, JSON.stringify(data, null, 2));
     } catch (error) {
       console.error('Failed to save cache index:', error);
     }
@@ -336,4 +349,35 @@ export class AudioManager {
     
     console.log(`Started audio cache cleanup timer (${this.config.cleanupIntervalMinutes} minutes)`);
   }
+}
+
+function normalizeToBuffer(data: any): Buffer {
+  // Add debug logging
+  console.log('Debug - normalizeToBuffer input:', {
+    type: typeof data,
+    isBuffer: Buffer.isBuffer(data),
+    isUint8Array: data instanceof Uint8Array,
+    keys: data && typeof data === 'object' ? Object.keys(data) : null
+  });
+
+  if (Buffer.isBuffer(data)) return data;
+  if (data instanceof Uint8Array) return Buffer.from(data);
+  if (data && typeof data === 'string') {
+    const maybeBase64 = /^[A-Za-z0-9+/=\s]+$/.test(data.trim());
+    if (maybeBase64) {
+      try { return Buffer.from(data, 'base64'); } catch {}
+    }
+    return Buffer.from(data, 'utf8');
+  }
+  if (data && typeof data === 'object') {
+    // Check for audioBuffer in the incoming data
+    if (data.audioBuffer) {
+      const audioBuffer = data.audioBuffer;
+      if (Buffer.isBuffer(audioBuffer)) return audioBuffer;
+      if (audioBuffer && typeof audioBuffer === 'object' && audioBuffer.type === 'Buffer' && Array.isArray(audioBuffer.data)) {
+        return Buffer.from(audioBuffer.data);
+      }
+    }
+  }
+  throw new TypeError('Unsupported audio data type: must be Buffer, base64 string or contain AudioStream/Body as binary.');
 }

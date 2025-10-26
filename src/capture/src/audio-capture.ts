@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
-import { exec } from 'child_process';
+import { exec, spawnSync } from 'child_process';
 import { promisify } from 'util';
+import * as os from 'os';
 
 const execAsync = promisify(exec);
 
@@ -25,9 +26,8 @@ export class AudioCapture extends EventEmitter {
 
   async start(): Promise<void> {
     const { spawn } = require('child_process');
-    const { platform } = require('os');
     
-    const isWindows = platform() === 'win32';
+    const isWindows = os.platform() === 'win32';
     let soxArgs: string[] = [];
     
     if (isWindows) {
@@ -143,4 +143,68 @@ export class AudioCapture extends EventEmitter {
     this.totalBytesSent = 0;
     this.chunksSent = 0;
   }
+}
+
+/**
+ * Enumerate Windows recording devices using PowerShell's Get-CimInstance.
+ * Uses spawnSync (tries 'powershell' then 'pwsh') to avoid quoting issues when using exec.
+ */
+export async function getWindowsRecordingDevices(): Promise<string[]> {
+  const psScript = `
+    Get-CimInstance Win32_SoundDevice |
+    Where-Object { $_.ConfigManagerErrorCode -eq 0 -and $_.StatusInfo -eq 3 } |
+    Select-Object -ExpandProperty Name
+  `.trim();
+
+  const shells = ['powershell', 'pwsh'];
+  for (const shell of shells) {
+    try {
+      const res = spawnSync(shell, ['-NoProfile', '-Command', psScript], {
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: 10000
+      });
+
+      if (res.error) {
+        // executable not found or spawn error
+        console.warn(`[AudioCapture] ${shell} spawn error:`, res.error);
+        continue;
+      }
+
+      if (res.status !== 0) {
+        console.warn(`[AudioCapture] ${shell} exited with status ${res.status}:`, (res.stderr || '').toString().trim());
+        continue;
+      }
+
+      const stdout = (res.stdout || '').toString();
+      const devices = stdout
+        .split(/\r?\n/)
+        .map(d => d.trim())
+        .filter(Boolean);
+
+      if (devices.length > 0) {
+        console.log('[AudioCapture] Found audio devices:', devices);
+        return devices;
+      }
+    } catch (err) {
+      console.warn(`[AudioCapture] Error running ${shell}:`, err);
+      continue;
+    }
+  }
+
+  console.warn('[AudioCapture] Falling back to default device only');
+  return ['Default'];
+}
+
+/**
+ * Cross-platform device enumeration
+ */
+export async function enumerateInputDevices(): Promise<string[]> {
+  if (os.platform() === 'win32') {
+    return getWindowsRecordingDevices();
+  }
+
+  // Generic fallback for non-Windows platforms
+  console.warn('No native audio enumeration available; returning default device only');
+  return ['Default'];
 }

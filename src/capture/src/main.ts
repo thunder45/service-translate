@@ -5,6 +5,7 @@ import { CognitoAuth } from './auth';
 import { DirectStreamingManager } from './direct-streaming-manager';
 import { WebSocketManager } from './websocket-manager';
 import { loadConfig, saveConfig } from './config';
+import { enumerateInputDevices } from './audio-capture';
 
 let mainWindow: BrowserWindow | null = null;
 let cognitoAuth: CognitoAuth | null = null;
@@ -112,121 +113,19 @@ ipcMain.handle('save-config', (_, config) => {
 
 ipcMain.handle('get-audio-devices', async () => {
   try {
-    const { exec } = require('child_process');
-    const { promisify } = require('util');
-    const { platform } = require('os');
-    const execAsync = promisify(exec);
-    
-    const isWindows = platform() === 'win32';
-    
-    if (isWindows) {
-      // Windows: Use PowerShell to enumerate RECORDING devices specifically
-      const psCommand = `
-        Add-Type -TypeDefinition @"
-        using System;
-        using System.Runtime.InteropServices;
-        public class AudioDeviceEnumerator {
-            [DllImport("winmm.dll", CharSet = CharSet.Auto)]
-            public static extern int waveInGetNumDevs();
-            
-            [DllImport("winmm.dll", CharSet = CharSet.Auto)]
-            public static extern int waveInGetDevCaps(IntPtr deviceId, ref WAVEINCAPS wic, int size);
-            
-            [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
-            public struct WAVEINCAPS {
-                public ushort wMid;
-                public ushort wPid;
-                public uint vDriverVersion;
-                [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-                public string szPname;
-                public uint dwFormats;
-                public ushort wChannels;
-                public ushort wReserved1;
-            }
-            
-            public static string[] GetRecordingDevices() {
-                int deviceCount = waveInGetNumDevs();
-                string[] devices = new string[deviceCount];
-                
-                for (int i = 0; i < deviceCount; i++) {
-                    WAVEINCAPS wic = new WAVEINCAPS();
-                    if (waveInGetDevCaps(new IntPtr(i), ref wic, Marshal.SizeOf(wic)) == 0) {
-                        devices[i] = wic.szPname;
-                    }
-                }
-                return devices;
-            }
-        }
-"@
-        [AudioDeviceEnumerator]::GetRecordingDevices() | ForEach-Object { $_ }
-      `.replace(/\n/g, ' ');
-      
-      try {
-        const { stdout } = await execAsync(`powershell -NoProfile -Command "${psCommand}"`, {
-          timeout: 10000,
-          maxBuffer: 1024 * 1024
-        });
-        
-        const devices = [{ id: 'default', name: 'Default System Input' }];
-        
-        const deviceNames = stdout.trim().split('\n').filter((line: string) => line.trim());
-        console.log('Windows recording devices found:', deviceNames);
-        
-        deviceNames.forEach((name: string, index: number) => {
-          const trimmedName = name.trim();
-          if (trimmedName) {
-            devices.push({ 
-              id: index.toString(), 
-              name: trimmedName
-            });
-          }
-        });
-        
-        return devices;
-      } catch (error) {
-        console.error('Windows audio device enumeration failed:', error);
-        console.log('Falling back to default device only');
-        return [{ id: 'default', name: 'Default System Input' }];
-      }
-    } else {
-      // macOS: Use system_profiler
-      const { stdout } = await execAsync('system_profiler SPAudioDataType');
-      const devices = [{ id: 'default', name: 'Default System Input' }];
-      
-      const lines = stdout.split('\n');
-      let currentDevice = '';
-      let hasInput = false;
-      
-      for (const line of lines) {
-        if (line.match(/^\s{8}[^:\s]+.*:$/)) {
-          if (currentDevice && hasInput) {
-            devices.push({ 
-              id: `coreaudio:${devices.length - 1}`, 
-              name: currentDevice 
-            });
-          }
-          
-          currentDevice = line.trim().replace(':', '');
-          hasInput = false;
-        }
-        
-        if (line.includes('Input Channels:')) {
-          const match = line.match(/Input Channels:\s*(\d+)/);
-          if (match && parseInt(match[1]) > 0) {
-            hasInput = true;
-          }
-        }
-      }
-      
-      if (currentDevice && hasInput) {
-        devices.push({ 
-          id: `coreaudio:${devices.length - 1}`, 
-          name: currentDevice 
-        });
-      }
-      
-      return devices;
+    const devices = await enumerateInputDevices();
+    const normalized = (devices || []).map((d: any, idx: number) => {
+      if (typeof d === 'string') return { id: String(idx), name: d };
+      if (d && typeof d === 'object' && d.name) return { id: d.id || String(idx), name: d.name };
+      return { id: String(idx), name: String(d) };
+    });
+
+    // Ensure a default entry is present
+    if (!normalized.find((x: any) => x.id === 'default' || /default/i.test(x.name))) {
+      normalized.unshift({ id: 'default', name: 'Default System Input' });
     }
+
+    return normalized;
   } catch (error) {
     console.error('Audio device enumeration failed:', error);
     return [{ id: 'default', name: 'Default System Input' }];
