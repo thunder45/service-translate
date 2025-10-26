@@ -5,6 +5,7 @@ import { AudioManager } from './audio-manager';
 import { AuthManager } from './auth-manager';
 import { AdminIdentityManager, CognitoTokens } from './admin-identity-manager';
 import { CognitoAuthService, CognitoAuthError, CognitoErrorCode } from './cognito-auth';
+import { ttsService } from './server';
 import { 
   AdminAuthMessage,
   AdminAuthResponse,
@@ -228,19 +229,57 @@ export class MessageRouter {
 
       // Prepare token response based on authentication method
       let accessToken: string;
+      let idToken: string | undefined;
       let tokenExpiry: string | undefined;
       let refreshToken: string | undefined;
 
       if ('cognitoTokens' in result && result.cognitoTokens) {
         // Credentials method - return new tokens
         accessToken = result.cognitoTokens.accessToken;
+        idToken = result.cognitoTokens.idToken;
         tokenExpiry = new Date(result.cognitoTokens.expiresIn * 1000).toISOString();
         refreshToken = result.cognitoTokens.refreshToken;
+
+        // Update TTSService credentials with ID token for AWS Polly
+        try {
+          const identityPoolId = process.env.AWS_IDENTITY_POOL_ID;
+          const userPoolId = process.env.COGNITO_USER_POOL_ID;
+          
+          if (idToken && identityPoolId && userPoolId) {
+            ttsService.updateCredentials(idToken, identityPoolId, userPoolId);
+            console.log(`Updated TTSService credentials for admin ${result.adminId}`);
+          } else {
+            console.warn('Missing environment variables for TTSService credential update');
+          }
+        } catch (error) {
+          console.error('Failed to update TTSService credentials:', error);
+          // Don't fail auth if TTS credential update fails
+        }
       } else {
         // Token method - return existing token
         accessToken = data.token!;
+        
+        // The token sent by client during reconnection should be the ID token
+        // which is needed for AWS Cognito Identity Pool authentication
+        idToken = data.token!;
         tokenExpiry = undefined;
         refreshToken = undefined;
+
+        // Update TTSService credentials with ID token for AWS Polly
+        try {
+          const identityPoolId = process.env.AWS_IDENTITY_POOL_ID;
+          const userPoolId = process.env.COGNITO_USER_POOL_ID;
+          
+          if (idToken && identityPoolId && userPoolId) {
+            ttsService.updateCredentials(idToken, identityPoolId, userPoolId);
+            console.log(`Updated TTSService credentials for admin ${result.adminId} (token reconnection)`);
+          } else {
+            console.warn('Missing environment variables for TTSService credential update');
+          }
+        } catch (error) {
+          console.error('Failed to update TTSService credentials:', error);
+          // Don't fail auth if TTS credential update fails
+        }
       }
 
       // Send successful authentication response with Cognito tokens
@@ -522,9 +561,21 @@ export class MessageRouter {
       }
 
       try {
-        // Note: AWS service credential updates were removed with TTSFallbackManager integration
-        // TTSService creates its own internal PollyClient with environment credentials
-        // No dynamic credential updates needed for TTS functionality
+        // Update TTSService credentials with new ID token for AWS Polly
+        const identityPoolId = process.env.AWS_IDENTITY_POOL_ID;
+        const userPoolId = process.env.COGNITO_USER_POOL_ID;
+        
+        if (!identityPoolId || !userPoolId) {
+          console.warn('Missing AWS environment variables for credential update');
+          this.sendAdminError(socket, AdminErrorCode.SYSTEM_INTERNAL_ERROR, {
+            operation: 'token-update',
+            validationErrors: ['AWS environment not configured']
+          });
+          return;
+        }
+
+        // Update TTSService with new ID token
+        ttsService.updateCredentials(data.idToken, identityPoolId, userPoolId);
 
         // Send success response
         socket.emit('token-update-response', {
@@ -533,12 +584,12 @@ export class MessageRouter {
           timestamp: new Date().toISOString()
         });
 
-        console.log(`AWS service credentials updated successfully for admin ${adminIdentity.adminId}`);
+        console.log(`TTSService credentials updated successfully for admin ${adminIdentity.adminId}`);
       } catch (error) {
-        console.error('AWS credentials update failed:', error);
+        console.error('TTSService credentials update failed:', error);
         this.sendAdminError(socket, AdminErrorCode.SYSTEM_INTERNAL_ERROR, {
           operation: 'token-update',
-          validationErrors: ['Failed to update AWS service credentials']
+          validationErrors: ['Failed to update TTS service credentials']
         });
       }
     } catch (error) {
